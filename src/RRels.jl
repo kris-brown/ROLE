@@ -4,9 +4,13 @@ Implication instances are *not* implications which have intersection between
 premises and conclusions.
 """
 module RRels 
-export RRel, RRelRSR, Implication
+export RRel, RRelRSR, Implication, RSR, Role, ⊔, ⊓
 
 using StructEquality, Combinatorics, PrettyTables, Random
+
+const imap = Iterators.map
+const ifilter = Iterators.filter
+const iproduct = Iterators.product
 
 # Implications (and incompatibilities)
 ######################################
@@ -33,32 +37,42 @@ it is less straightforward to assess "is bearer #2 in the premises of this?".
   conc::BitSet
 end
 
+prem(i::Implication) = i.prem
+conc(i::Implication) = i.conc
+
+Base.length(::Implication) = 2
+
+const ΓΔ₀ = Implication([],[])
+
 Implication(p1::AbstractVector, p2::AbstractVector) = 
   Implication(BitSet(Vector{Int}(p1)), BitSet(Vector{Int}(p2)))
 
 Implication(p::Pair) = Implication(p...)
 
-function Base.show(io::IO, ::MIME"text/plain", i::Implication) 
-  print(io, join(string.(i.prem),",")," ⊢ ",join(string.(i.conc),","))
+Base.show(io::IO, ::MIME"text/plain", i::Implication) =
+  let (Γ, Δ) = join.(i, ","); print(io, Γ, " ⊢ ", Δ) end
+
+Base.iterate(i::Implication, x...) = iterate((prem(i), conc(i)), x...)
+
+Base.isless(i₁::Implication, i₂::Implication) = let (Γ, Δ) = i₁, (X, Y) = i₂;
+  (Γ, Δ) ≤ (X, Y)
 end
 
-Base.isless(i₁::Implication, i₂::Implication) = 
-  (i₁.prem, i₁.conc) ≤ (i₂.prem, i₂.conc)
+Base.string(i::Implication) = sprint(show, "text/plain", i)
 
-Base.string(i::Implication) = sprint(show,"text/plain",i)
+Base.isempty(i::Implication) = all(isempty, i)
 
-Base.isempty(i::Implication) = isempty(i.prem) && isempty(i.conc)
-
-Base.:(+)(i::Implication, j::Implication) = 
-  Implication(i.prem ∪ j.prem, i.conc ∪ j.conc)
+Base.:(+)(i::Implication, j::Implication) = let (Γ, Δ) = i, (X, Y) = j;
+  Implication(Γ ∪ X, Δ ∪ Y)
+end
 
 """ Is the implication one which is required by containment? """
-contain(i::Implication)::Bool = intersects(i.prem, i.conc)
+contain(i::Implication)::Bool = intersects(i...)
 
 """ Check if a bearer is mentioned at all """
-Base.in(i::Int, imp::Implication) = i ∈ imp.prem || i ∈ imp.conc
+Base.in(i::Int, imp::Implication) = i ∈ prem(imp) || i ∈ conc(imp)
 
-swap(i::Implication) = Implication(i.conc, i.prem)
+swap(i::Implication) = Implication(conc(i), prem(i))
 
 # Reason relations
 ##################
@@ -98,15 +112,15 @@ Base.in(i::Implication, r::RRel) = i ∈ r.I
 
 """Iterator for all possible implications on a set of `n` bearers"""
 function all_implications(n::Int)
-  it = Iterators.map(x->BitSet(x), powerset(1:n))
-  Iterators.map(((Γ,Δ),) -> Implication(Γ,Δ), Iterators.product(it, it))
+  it = imap(x -> BitSet(x), powerset(1:n))
+  imap(((Γ,Δ),) -> Implication(Γ,Δ), iproduct(it, it))
 end
 
 """
 Either all implications except those which satisfy containment (default) or 
 just the ones which satisfy containment
 """
-containment(n::Int, exclude=true) = Iterators.filter(all_implications(n)) do i 
+containment(n::Int, exclude=true) = ifilter(all_implications(n)) do i 
   (exclude ? (!) : identity)(contain(i))
 end
 
@@ -120,8 +134,9 @@ else
 end
 
 """Check if the result of merging two implications will satisfy containment"""
-intersect_add(ΓΔ::Implication, XY::Implication) = 
-  intersects(ΓΔ.prem, XY.conc) || intersects(ΓΔ.conc, XY.prem) 
+intersect_add(i::Implication, j::Implication) = let (Γ, Δ) = i, (X, Y) = j;
+  intersects(Γ, Y) || intersects(Δ, X) 
+end
 
 """
 A reason relation with lots of precomputed, cached info (including RSRs)
@@ -148,21 +163,21 @@ The RSR of an implication that satisfies containment is all of 𝒫(B)²
     I = BitSet(getindex.(Ref(inv_implication), r.I))
     Iinv = Dict(v => i for (i,v) in enumerate(I))
     lattice = [BitSet([j for j in i:PN if i ⊆ j]) for i in 1:PN]
-    prem = map(1:r.N) do i 
-      BitSet(j for (j, x) in enumerate(implications) if i ∈ x.prem)
+    pre = map(1:r.N) do i 
+      BitSet(j for (j, x) in enumerate(implications) if i ∈ prem(x))
     end
-    conc = map(1:r.N) do i 
-      BitSet(j for (j, x) in enumerate(implications) if i ∈ x.conc)
+    con = map(1:r.N) do i 
+      BitSet(j for (j, x) in enumerate(implications) if i ∈ conc(x))
     end
     RSR = map(implications) do ΓΔ
-      BitSet(Iterators.map(first, Iterators.filter(enumerate(implications)) do (i, XY)
+      BitSet(imap(first, ifilter(enumerate(implications)) do (i, XY)
         intersect_add(ΓΔ, XY) || ΓΔ+XY ∈ r.I
       end))
     end
     RSR′ = [BitSet(j for j in 1:PN if i ∈ RSR[j]) for i in 1:PN]
-    goodprem = [p ∩ RSR[1] for p in prem]
-    goodconc = [p ∩ RSR[1] for p in conc]
-    new(r, implications, inv_implication, I, Iinv, lattice, prem, conc, 
+    goodprem = [p ∩ RSR[1] for p in pre]
+    goodconc = [p ∩ RSR[1] for p in con]
+    new(r, implications, inv_implication, I, Iinv, lattice, pre, con, 
         goodprem, goodconc, RSR, RSR′)
   end
 end
@@ -173,10 +188,74 @@ end
 Base.getindex(rr::RRelRSR, i::Int) = rr.implications[i]
 
 Base.getindex(rr::RRelRSR, i::Implication) = rr.inv_implication[i]
+Base.haskey(rr::RRelRSR, i::Implication) = haskey(rr.inv_implication, i)
 
 Base.getindex(rr::RRelRSR, Γ::AbstractVector, Δ::AbstractVector) = 
   rr.inv_implication[Implication(Γ, Δ)]
 
 Base.length(r::RRelRSR) = length(r.rrel)
+
+""" RSR of an implication """
+RSR(rr::RRelRSR, i::Int)::BitSet = rr.RSR[i]
+
+""" RSR of a set of implications """
+RSR(rr::RRelRSR, is::BitSet)::BitSet = begin
+  res = BitSet(1:length(rr.implications))
+  for i in is 
+    intersect!(res, rr.RSR[i])
+  end
+  return res
+end
+
+""" 
+
+Addition of implications via their indices, returning the index of the result. 
+When implications added together produces an implication that is guaranteed by 
+containment (ones for which we have no index), return 0.
+
+"""
+add(rr::RRelRSR, is::Int...) = let idx = sum(rr[i] for i in is; init=ΓΔ₀);
+  haskey(rr, idx) ? rr[idx] : 0
+end
+
+# Conceptual roles 
+##################
+abstract type AbsRole end
+
+# the role of a trivial implication, i.e. one true by containment
+@struct_hash_equal struct TrivialRole <: AbsRole end
+
+role(::TrivialRole) = TrivialRole()
+
+""" 
+A conceptual role is represented by a set of implications - the role itself 
+is the equivalence class of sets of implications that have the same RSR.
+"""
+@struct_hash_equal struct Role <: AbsRole 
+  role::BitSet
+end 
+
+Role(r::Role) = r
+
+Role(x::AbstractVector) = Role(BitSet(x))
+
+role(r::Role) = r.role
+
+RSR(rr::RRelRSR, r::Role) = RSR(rr, role(r))
+
+""" The adjunction of a set of implicational roles """
+⊔(rr::RRelRSR, is::AbstractVector{Role}) = ⊔(rr, is)
+⊔(rr::RRelRSR, xs...) = ⊔(rr, Role.(xs)...)
+
+function⊔(rr::RRelRSR, xs::Role...) 
+  Role(BitSet(ifilter(>(0), [add(rr, combo...) for combo in iproduct(role.(xs)...)])))
+end
+
+
+""" The symjunction of """
+⊓(is::AbstractVector{Role}) = ⊓(is...)
+⊓(xs...) = ⊓(Role.(xs)...)
+
+⊓(xs::Role...) = Role(∪(role.(xs)...))
 
 end #module

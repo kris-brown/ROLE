@@ -3,7 +3,7 @@ Various notions of maps between reason relations and algorithms for
 finding them / verifying the naturality of purported maps.
 """
 module RMaps 
-export RRelMap, is_natural, homomorphisms, homomorphism, RRelC, RRelC′ 
+export RRelMap, is_natural, homomorphisms, homomorphism, RRelC, RRelC′, Interp
 
 using StructEquality
 using MLStyle: @match, @data
@@ -11,9 +11,11 @@ using MLStyle: @match, @data
 using GATlab
 
 using ..RRels
-using ..RRels: intersects, contain
+using ..RRels: intersects, contain, AbsRole, all_implications, role, containment
 
 const Maybe{T} = Union{T, Nothing}
+const ifilter = Iterators.filter
+const imap = Iterators.map
 
 """
 A function on bearers. Should send good implications to good ones.
@@ -42,23 +44,47 @@ contraction because their RSR is the entire set of implications, such that
 intersecting with them is a no-op.
 
 E.g. for a map X → Y, we specify a function X → 𝒫(𝒫(Y)²)
-
-Given a total ordering on the non-containment candidate implications of Y, we
-can encode this as a set of integers.
 """
 @struct_hash_equal struct RoleMap
-  fB::Vector{Vector{Int}}
+  fB::Vector{<:AbsRole}
 end
+
+RoleMap(xs::Vector{Any}) = RoleMap(Role.(xs))
+
+(f::RoleMap)(i::BitSet) = f(collect(i))
+(f::RoleMap)(i::Union{Int, AbstractVector{Int}}) = f.fB[i]
 
 """
 Pair of interpretation functions, sending bearers to their premisory role
-and their conclusory role
+and their conclusory role. This is the data of a function X → 𝒫(𝒫(Y)²)²
 """
 @struct_hash_equal struct Interp 
   prem::RoleMap
   conc::RoleMap
 end
 
+Interp(a,b) = Interp(RoleMap(a), RoleMap(b))
+
+Interp(prem::AbstractVector{<:AbstractVector{Int}},
+       conc::AbstractVector{<:AbstractVector{Int}}
+      ) = Interp(RoleMap(prem), RoleMap(conc))
+
+""" 
+The interpretation of the domain lexicon into the codomain induces a reason
+relation.
+"""
+function ideal(i::Interp, codom::RRelRSR)::RRel
+  i⁺, i⁻ = i.prem, i.conc
+  N = length(i⁺.fB)
+  I = ifilter(containment(N)) do (Γ, Δ)
+    # println("Γ $(string(Γ)), Δ $(string(Δ))")
+    # println("\ti⁺(Γ) $(role.(i⁺(Γ)))")
+    # println("\ti⁻(Δ) $(role.(i⁻(Δ)))")
+    # println("\trole(⊔...)) $(role(⊔(codom, i⁺(Γ)..., i⁻(Δ)...)))")
+    RSR(codom, ⊔(codom, i⁺(Γ)..., i⁻(Δ)...)) ⊆ codom.I
+  end |> collect
+  RRel(N, I)
+end
 
 # Categories
 ############
@@ -207,17 +233,18 @@ end
 
 """ Initialize `possibilities` for BacktrackingState """
 function init_possibilities(X::RRelRSR, Y::RRelRSR)
-  Iterators.map((X.I)) do i
-    ΓΔ = X[i]
-    BitSet(Iterators.map(last, Iterators.filter(pairs(Y.inv_implication)) do (XY, j) 
-      isempty(XY.prem) && !isempty(ΓΔ.prem) && return false
-      isempty(XY.conc) && !isempty(ΓΔ.conc) && return false
-      length(ΓΔ.prem) ≥ length(XY.prem) && length(ΓΔ.conc) ≥ length(XY.conc) 
+  imap((X.I)) do i
+    (Γ, Δ) = X[i]
+    BitSet(imap(last, ifilter(pairs(Y.inv_implication)) do ((X,Y), j) 
+      isempty(X) && !isempty(Γ) && return false
+      isempty(Y) && !isempty(Δ) && return false
+      length(Γ) ≥ length(X) && length(Δ) ≥ length(Y) 
     end))
   end
 end
 
-function assign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, x::Int, y::Int)::Bool
+function assign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, 
+                      x::Int, y::Int)::Bool
   y′ = state.assignment[x]
   y′ == y && return true  # If x is already assigned to y, return immediately.
   y′ == 0 || return false # Otherwise, x must be unassigned.
@@ -233,7 +260,7 @@ function assign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, x::Int,
     # What are the possible good inferences this could be sent to?
     fΓzs, fΔzs = count.(==(0), [fΓ, fΔ])
     fΓnz, fΔnz = filter.(!=(0), [fΓ, fΔ])
-    y_poss = Iterators.filter(state.codom.I) do j
+    y_poss = ifilter(state.codom.I) do j
       XY = state.codom[j]
       !isempty(XY.prem) || isempty(ΓΔ.prem) || return false
       !isempty(XY.conc) || isempty(ΓΔ.conc) || return false
@@ -248,7 +275,8 @@ function assign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, x::Int,
   return true
 end
 
-function unassign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, x::Int)::Nothing
+function unassign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, 
+                        x::Int)::Nothing
   state.assignment[x] == 0 && return nothing
   assign_depth = state.assignment_depth[x]
   @assert assign_depth <= depth
@@ -280,11 +308,13 @@ function backtracking_search(cat::Interp, f, X::RRelRSR, Y::RRelRSR; kw...)
   backtracking_search(cat, f, state, 1)
 end
 
-function assign_elem!(::Interp, state::InterpBacktrackingState, depth::Int, x::Int, y::Int)::Bool
+function assign_elem!(::Interp, state::InterpBacktrackingState, depth::Int, 
+                      x::Int, y::Int)::Bool
   error("TODO")
 end
 
-function unassign_elem!(::Interp, state::InterpBacktrackingState, depth::Int, x::Int)::Nothing
+function unassign_elem!(::Interp, state::InterpBacktrackingState, depth::Int, 
+                        x::Int)::Nothing
   error("TODO")
 end
 

@@ -1,6 +1,6 @@
 using ROLE, Test
-using ROLE.RRels: containment, all_implications, RRelRSR
-using ROLE.RMaps: naturality_failures
+using ROLE.RRels: containment, all_implications, RRelRSR, add
+using ROLE.RMaps: naturality_failures, ideal
 
 using GATlab 
 
@@ -24,21 +24,48 @@ rrel = RRel(2, [Int[]=>[1], [1,2]=>Int[], [1]=>[2]]);
 empty_rrel = RRel(3)
 rand_rrel = RRel(3; random=true)
 
-# Reason relations with cached RSRS 
+# Reason relations with cached RSRS
 ###################################
 rsrs = RRelRSR(rrel)
-idx₁ = rsrs[[1],[]]
-@test idx₁ ∈ rsrs.prem[1]
-@test idx₁ ∉ rsrs.conc[1]
-idx₂ = rsrs[[2],[]]
-@test idx₂ ∈ rsrs.RSR[idx₁]
-@test idx₁ ∈ rsrs.RSR[idx₂]
+RSRa⁺, RSRa⁻ = rsrs[[1],[]], rsrs[[],[1]]
+@test RSRa⁺ ∈ rsrs.prem[1]
+@test RSRa⁺ ∉ rsrs.conc[1]
+RSRb⁺, RSRb⁻ = rsrs[[2],[]], rsrs[[],[2]]
+@test RSRb⁺ ∈ rsrs.RSR[RSRa⁺]
+@test RSRa⁺ ∈ rsrs.RSR[RSRb⁺]
 
 one′ = rsrs[[],[1]]
-@test one′ ∉ rsrs.RSR[idx₂]
+@test one′ ∉ rsrs.RSR[RSRb⁺]
 @test one′ ∈ rsrs.RSR[one′]
 
-# RSR morphisms
+idx₁₂ = rsrs[[1,2],[]]
+@test add(rsrs, RSRa⁺, RSRb⁺) == idx₁₂
+@test add(rsrs, RSRa⁺, one′) == 0 # these implications intersect
+
+# Computing with RSRs
+#####################
+
+@test RSRb⁺ ∈ RSR(rsrs, RSRa⁺)
+@test RSRb⁻ ∈ RSR(rsrs, RSRa⁺)
+@test RSRa⁺ ∉ RSR(rsrs, RSRa⁺)
+
+@test RSRa⁺ ∉ RSR(rsrs, RSRb⁺)
+
+
+a⁺,a⁻,b⁺,b⁻  = Role.([[RSRa⁺],[RSRa⁻],[RSRb⁺],[RSRb⁻]])
+
+RSRab⁺ = rsrs[[1,2],[]]
+ab⁺ = Role([RSRab⁺])
+ab⁻ = Role([rsrs[[],[1,2]]])
+
+a_b⁺ = Role([RSRa⁺, RSRb⁺])
+a_b⁻ = Role([RSRa⁻, RSRb⁻])
+
+@test ⊔(rsrs, a_b⁺, a_b⁺) == Role([RSRa⁺, RSRb⁺, RSRab⁺])
+@test ⊔(rsrs, a⁺, b⁺) == ab⁺
+@test ⊓(b⁺, a_b⁺) == a_b⁺
+
+# RRel morphisms
 ###############
 
 (m,) = homomorphisms(rsrs, rsrs)
@@ -51,3 +78,33 @@ end
 ##########################
 # [a, b, ¬a, ¬b, a∧b, a∨b]
 elab = RRel(6, [Int[]=>[1], [1,2]=>Int[], [1]=>[2], ]); # TODO
+
+a_b_ab = ⊓(a⁺, b⁺, ⊔(rsrs, a⁻,b⁻))
+
+# elab → rrel
+interp = Interp([a⁺,b⁺,a⁻,b⁻,ab⁺, a_b_ab],
+                [a⁻,b⁻,a⁺,b⁺, a_b_ab, ab⁺]) 
+
+ideal(interp, rrel)
+
+
+#               ×        ×          ✓         ✓        ×        ✓
+# a- has RSR {∅ ⊢ ∅ || 1 ⊢ ∅ || 1,2 ⊢ ∅ || ∅ ⊢ 1 || 2 ⊢ 1 || 1 ⊢ 2}
+a = ideal(Interp([a⁺], [a⁻]), rsrs )
+
+⊤ = Role(1:9)
+               # ✓         ×         ×
+⊔(rsrs, ⊤, a⁻) # ⊢ 1 ||  2 ⊢ 1  ||  ⊢ 1,2
+"""
+Γ BitSet([]), Δ BitSet([1])
+    p(Γ) BitSet[]
+    c(Δ) BitSet[BitSet([5])]
+    role(⊔...)) BitSet([5])
+    COMPUTING RSR w/ is=BitSet([5])
+        intersect BitSet([1, 2, 4, 5, 8])
+    RES BitSet([1, 2, 4, 5, 8]) 
+"""
+
+neg_a = ideal(Interp([a⁺,b⁺,a⁻], 
+                     [a⁻,b⁻,a⁺]), rsrs )
+
