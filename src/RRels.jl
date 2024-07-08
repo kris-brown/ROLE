@@ -6,7 +6,10 @@ premises and conclusions.
 module RRels 
 export RRel, RRelRSR, Implication
 
-using StructEquality, Combinatorics, PrettyTables
+using StructEquality, Combinatorics, PrettyTables, Random
+
+# Implications (and incompatibilities)
+######################################
 
 """
 Note, there is a way of representing implications which exclude the possibility
@@ -30,13 +33,8 @@ it is less straightforward to assess "is bearer #2 in the premises of this?".
   conc::BitSet
 end
 
-"""Cast generic vectors to Int vectors"""
 Implication(p1::AbstractVector, p2::AbstractVector) = 
-  Implication(Vector{Int}(p1), Vector{Int}(p2))
-
-"""Cast Int vectors to BitSets"""
-Implication(p1::AbstractVector{Int}, p2::AbstractVector{Int}) = 
-  Implication(BitSet(p1), BitSet(p2))
+  Implication(BitSet(Vector{Int}(p1)), BitSet(Vector{Int}(p2)))
 
 Implication(p::Pair) = Implication(p...)
 
@@ -44,26 +42,32 @@ function Base.show(io::IO, ::MIME"text/plain", i::Implication)
   print(io, join(string.(i.prem),",")," ⊢ ",join(string.(i.conc),","))
 end
 
+Base.isless(i₁::Implication, i₂::Implication) = 
+  (i₁.prem, i₁.conc) ≤ (i₂.prem, i₂.conc)
+
 Base.string(i::Implication) = sprint(show,"text/plain",i)
 
 Base.isempty(i::Implication) = isempty(i.prem) && isempty(i.conc)
 
-function Base.:(+)(i::Implication, j::Implication)
+Base.:(+)(i::Implication, j::Implication) = 
   Implication(i.prem ∪ j.prem, i.conc ∪ j.conc)
-end
 
-"""Is the implication one which is obligated by containment?"""
+""" Is the implication one which is required by containment? """
 contain(i::Implication)::Bool = intersects(i.prem, i.conc)
 
-"""Check if bearer is mentioned at all"""
+""" Check if a bearer is mentioned at all """
 Base.in(i::Int, imp::Implication) = i ∈ imp.prem || i ∈ imp.conc
 
 swap(i::Implication) = Implication(i.conc, i.prem)
 
-""" Most basic representation of a reason relation on a set of bearers 1:N"""
+# Reason relations
+##################
+
+""" Most basic representation of a reason relation on a set of bearers 1:N """
 @struct_hash_equal struct RRel
   N::Int
-  I::Set{Implication}
+  I::Vector{Implication}
+  RRel(N, I) = unique(I) == I ? new(N, I) : error("Non unique I: $I")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", r::RRel) 
@@ -78,7 +82,17 @@ end
 
 Base.length(r::RRel) = r.N
 
-RRel(B::Int, I::Vector{<:Pair}) = RRel(B, Set(Implication.(I)))
+RRel(B::Int, I::Vector{<:Pair}) = RRel(B, sort(Implication.(I)))
+
+function RRel(B::Int; random=false)
+  I = if random
+    all_Is = shuffle(collect(all_implications(B)))
+    all_Is[1:rand(0:length(all_Is))]
+  else 
+    Pair[]
+  end
+  return RRel(B, I)
+end
 
 Base.in(i::Implication, r::RRel) = i ∈ r.I
 
@@ -106,11 +120,13 @@ else
 end
 
 """Check if the result of merging two implications will satisfy containment"""
-intersects(ΓΔ::Implication, XY::Implication) = 
+intersect_add(ΓΔ::Implication, XY::Implication) = 
   intersects(ΓΔ.prem, XY.conc) || intersects(ΓΔ.conc, XY.prem) 
 
 """
 A reason relation with lots of precomputed, cached info (including RSRs)
+
+The RSR of an implication that satisfies containment is all of 𝒫(B)² 
 """
 @struct_hash_equal struct RRelRSR
   rrel::RRel
@@ -140,7 +156,7 @@ A reason relation with lots of precomputed, cached info (including RSRs)
     end
     RSR = map(implications) do ΓΔ
       BitSet(Iterators.map(first, Iterators.filter(enumerate(implications)) do (i, XY)
-        intersects(ΓΔ, XY) || ΓΔ+XY ∈ r.I
+        intersect_add(ΓΔ, XY) || ΓΔ+XY ∈ r.I
       end))
     end
     RSR′ = [BitSet(j for j in 1:PN if i ∈ RSR[j]) for i in 1:PN]

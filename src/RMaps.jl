@@ -3,10 +3,12 @@ Various notions of maps between reason relations and algorithms for
 finding them / verifying the naturality of purported maps.
 """
 module RMaps 
-export RRelMap, is_natural, homomorphisms, homomorphism
+export RRelMap, is_natural, homomorphisms, homomorphism, RRelC, RRelC′ 
 
 using StructEquality
 using MLStyle: @match, @data
+
+using GATlab
 
 using ..RRels
 using ..RRels: intersects, contain
@@ -30,16 +32,71 @@ Base.iterate(r::RRelMap, i...) = iterate(r.fB, i...)
 """ 
 Is it the case that the action of the map sends all good inferences to good ones
 """
-is_natural(r::RRelMap, dom::RRel, codom::RRel) =
-  isempty(naturality_failures(r, dom, codom))
+is_natural(f, dom::RRel, codom::RRel, m::Model) =
+  isempty(naturality_failures(m, f, dom, codom))
+
+"""
+A map sending bearers to conceptual roles (i.e. RSRs of a subset of 
+*candidate* implications). We need not mention implications which satisfy 
+contraction because their RSR is the entire set of implications, such that 
+intersecting with them is a no-op.
+
+E.g. for a map X → Y, we specify a function X → 𝒫(𝒫(Y)²)
+
+Given a total ordering on the non-containment candidate implications of Y, we
+can encode this as a set of integers.
+"""
+@struct_hash_equal struct RoleMap
+  fB::Vector{Vector{Int}}
+end
+
+"""
+Pair of interpretation functions, sending bearers to their premisory role
+and their conclusory role
+"""
+@struct_hash_equal struct Interp 
+  prem::RoleMap
+  conc::RoleMap
+end
+
+
+# Categories
+############
+struct RRelC <: Model{Tuple{RRel, RRelMap}} end
+
+@instance ThCategory{RRel, RRelMap} [model::RRelC] begin
+  Hom(f::RRelMap, d::RRel, c::RRel; model) =
+    is_natural(model, f, d, c) ? f : @fail join(
+      naturality_failures(model, f, d, c), "\n")
+
+  id(rr::RRel) = RRelMap(collect(1:rr.N))
+  compose(f::RRelMap, g::RRelMap) = 
+    RRelMap(ThCategory.compose[FinSetC()](f.fB, g.fB))
+end
+
+struct RRelC′ <: Model{Tuple{RRel, RRelMap}} end
+
+@instance ThCategory{RRel, Interp} [model::RRelC′] begin
+  Hom(f::Interp, d::RRel, c::RRel; model) =
+    is_natural(model, f, d, c) ? f : @fail join(
+      naturality_failures(model, f, d, c), "\n")
+
+  id(rr::RRel) = Interp(collect(1:rr.N))
+  compose(f::Interp, g::Interp) = error("TODO")
+end
+
+# Naturality 
+############
 
 """
 Find examples where Γ⊢Δ but f(Γ)⊬f(Δ)
 """
-function naturality_failures(r::RRelMap, dom::RRel, codom::RRel)
+function naturality_failures(::RRelC, r::RRelMap, dom::RRel, codom::RRel)
+  # Error if map is syntactically malformed
   length(r) == length(dom) || error("Bad map length")
   all(>(0), r.fB) || error("Out of bounds")
   maximum(r; init=0) ≤ length(codom) || error("out of bounds")
+  # Find naturality failures
   res = String[]
   for ΓΔ in dom.I
     rΓΔ = r(ΓΔ) 
@@ -50,36 +107,86 @@ function naturality_failures(r::RRelMap, dom::RRel, codom::RRel)
   return res
 end
 
-"""
-An interpretation function on bearers. Sends bearers to sets of bearers (i.e.
-a relation between the two bearer sets).
-"""
-@struct_hash_equal struct RRelRel
-  fB::Vector{Vector{Int}}
-end
 
 """
-Pair of interpretation functions, sending bearers to their premisory role
-and their conclusory role
+Find examples where  ⟦Γ⟧ ⊢ ⟦Δ⟧ but Γ⊬Δ
 """
-@struct_hash_equal struct RRelRel2
-  prem::RRelRel
-  conc::RRelRel
+function naturality_failures(::RRelC′, r::RRelMap, dom::RRel, codom::RRel)
+  error("TODO")
 end
-
-function is_natural(f::RRelRel2, dom::RRel, codom::RRel)
-end
-
 
 # Homomorphism search
 #####################
+abstract type BacktrackingState end 
+
+function homomorphism(X::RRelRSR, Y::RRelRSR; cat=RRelC(), kw...)
+  result = nothing
+  backtracking_search(cat, X, Y; kw...) do α
+    result = α; return true
+  end
+  return result
+end
+
+function homomorphisms(X::RRelRSR, Y::RRelRSR; 
+                       cat::Model{Tuple{RRel,Hom}}=RRelC(), kw...)  where {Hom}
+  results = Hom[]
+  backtracking_search(cat, X, Y; kw...) do α
+    push!(results, deepcopy(α)); return false
+  end
+  return results
+end
+
+""" Main loop of backtracking search """
+function backtracking_search(f, cat::Model, state::BacktrackingState, depth::Int) 
+  # Choose the next unassigned element.
+  mrv, x, options = find_mrv_elem(cat, state, depth)
+  if isnothing(x)
+    return f(RRelMap(state.assignment))
+  elseif mrv == 0
+    return false # No allowable assignment, so we must backtrack.
+  end
+  # Attempt all assignments of the chosen element.
+  for y in options
+    (assign_elem!(cat, state, depth, x, y) 
+    && backtracking_search(f, cat, state, depth + 1)) && return true
+    unassign_elem!(cat, state, depth, x)
+  end
+  return false
+end
+
+""" Find the most constrained element """
+function find_mrv_elem(cat::Model, state::BacktrackingState, depth::Int 
+                      )::Tuple{Number, Maybe{Int},Maybe{Vector{Int}}}
+  Ny = length(state.codom)
+  mrv, mrv_elem, options = Inf, nothing, nothing
+  for x in 1:length(state.dom)
+    state.assignment[x] == 0 || continue
+    x_opts = filter(y -> can_assign_elem(cat, state, depth, x, y), 1:Ny)
+    if length(x_opts) < mrv
+      mrv, mrv_elem, options = length(x_opts), x, x_opts
+    end
+  end
+  return (mrv, mrv_elem, options)
+end
+
+# Nonmutating overall, but we temporarily mutate the backtracking state.
+function can_assign_elem(cat::Model, state::BacktrackingState, depth::Int, 
+                         x::Int, y::Int)::Bool
+  ok = assign_elem!(cat, state, depth, x, y)
+  unassign_elem!(cat, state, depth, x)
+  return ok
+end
+
+# RRelC-specific
+#---------------
+
 """
 assignment: the partially-specified mapping of bearers (0 = unspecified)
 possibilities: assigning for each good inference in the domain what good 
-               inferences in the codomain could be mapped to, given the 
-               current assignment. Only explicitly track non-containment ones.
+               (non-containment) inferences in the codomain could be mapped to, 
+               given the current assignment.
 """
-struct BacktrackingState
+struct RRelBacktrackingState <: BacktrackingState
   dom::RRelRSR
   codom::RRelRSR
   assignment::Vector{Int}
@@ -89,29 +196,13 @@ end
 
 (s::BacktrackingState)(i::Int) = s.assignment[i]
 
-function homomorphism(X::RRelRSR, Y::RRelRSR; kw...)
-  result = nothing
-  backtracking_search(X, Y; kw...) do α
-    result = α; return true
-  end
-  return result
-end
-
-function homomorphisms(X::RRelRSR, Y::RRelRSR; kw...) 
-  results = []
-  backtracking_search(X, Y; kw...) do α
-    push!(results, deepcopy(α)); return false
-  end
-  return results
-end
-
 """
 Search the space of functions Yˣ of functions from bearers of X to bearers of Y.
 """
-function backtracking_search(f, X::RRelRSR, Y::RRelRSR; kw...)
-  state = BacktrackingState(X, Y, zeros(Int, length(X)), zeros(Int, length(X))
+function backtracking_search(f, cat::RRelC, X::RRelRSR, Y::RRelRSR; kw...)
+  state = RRelBacktrackingState(X, Y, zeros(Int, length(X)), zeros(Int, length(X))
                            ) # init_possibilities(X, Y)
-  backtracking_search(f, state, 1)
+  backtracking_search(f, cat, state, 1)
 end
 
 """ Initialize `possibilities` for BacktrackingState """
@@ -126,50 +217,7 @@ function init_possibilities(X::RRelRSR, Y::RRelRSR)
   end
 end
 
-""" Main loop of backtracking search """
-function backtracking_search(f, state::BacktrackingState, depth::Int) 
-  # Choose the next unassigned element.
-  println("DEPTH $depth Finding MRV")
-  mrv, x, options = find_mrv_elem(state, depth)
-  println("DEPTH $depth: Found MRV $x ↦ $options")
-  if isnothing(x)
-    println("\n*RESULT*\n")
-    return f(RRelMap(state.assignment))
-  elseif mrv == 0
-    return false # No allowable assignment, so we must backtrack.
-  end
-  # Attempt all assignments of the chosen element.
-  for y in options
-    (assign_elem!(state, depth, x, y) 
-    && backtracking_search(f, state, depth + 1)) && return true
-    unassign_elem!(state, depth, x)
-  end
-  return false
-end
-
-""" Find the most constrained element """
-function find_mrv_elem(state::BacktrackingState, depth::Int 
-                      )::Tuple{Number, Maybe{Int},Maybe{Vector{Int}}}
-  Ny = length(state.codom)
-  mrv, mrv_elem, options = Inf, nothing, nothing
-  for x in 1:length(state.dom)
-    state.assignment[x] == 0 || continue
-    x_opts = filter(y -> can_assign_elem(state, depth, x, y), 1:Ny)
-    if length(x_opts) < mrv
-      mrv, mrv_elem, options = length(x_opts), x, x_opts
-    end
-  end
-  (mrv, mrv_elem, options)
-end
-
-# Nonmutating overall, but we temporarily mutate the backtracking state.
-function can_assign_elem(state::BacktrackingState, depth::Int, x::Int, y::Int)::Bool
-  ok = assign_elem!(state, depth, x, y)
-  unassign_elem!(state, depth, x)
-  return ok
-end
-
-function assign_elem!(state::BacktrackingState, depth::Int, x::Int, y::Int)::Bool
+function assign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, x::Int, y::Int)::Bool
   y′ = state.assignment[x]
   y′ == y && return true  # If x is already assigned to y, return immediately.
   y′ == 0 || return false # Otherwise, x must be unassigned.
@@ -200,7 +248,7 @@ function assign_elem!(state::BacktrackingState, depth::Int, x::Int, y::Int)::Boo
   return true
 end
 
-function unassign_elem!(state::BacktrackingState, depth::Int, x::Int)::Nothing
+function unassign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, x::Int)::Nothing
   state.assignment[x] == 0 && return nothing
   assign_depth = state.assignment_depth[x]
   @assert assign_depth <= depth
@@ -211,7 +259,33 @@ function unassign_elem!(state::BacktrackingState, depth::Int, x::Int)::Nothing
   return nothing
 end
 
+# Interpretation function search
+#--------------------------------
 
+"""
+assignment: the partially-specified mapping of bearers (0 = unspecified)
+"""
+struct InterpBacktrackingState <: BacktrackingState
+  dom::RRelRSR
+  codom::RRelRSR
+  assignment::Matrix{Bool}
+  assignment_depth::Matrix{Int}
+end 
 
+"""
+Search the space of functions Yˣ of functions from bearers of X to bearers of Y.
+"""
+function backtracking_search(cat::Interp, f, X::RRelRSR, Y::RRelRSR; kw...)
+  state = InterpBacktrackingState(X, Y, zeros(Int, length(X)), zeros(Int, length(X)))
+  backtracking_search(cat, f, state, 1)
+end
+
+function assign_elem!(::Interp, state::InterpBacktrackingState, depth::Int, x::Int, y::Int)::Bool
+  error("TODO")
+end
+
+function unassign_elem!(::Interp, state::InterpBacktrackingState, depth::Int, x::Int)::Nothing
+  error("TODO")
+end
 
 end # module
