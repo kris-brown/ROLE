@@ -2,9 +2,9 @@ module ROLE
 
 using Reexport
 
-include("RRels.jl")
+include("ImpFrames.jl")
 include("RMaps.jl")
-@reexport using .RRels
+@reexport using .ImpFrames
 @reexport using .RMaps
 
 end # module

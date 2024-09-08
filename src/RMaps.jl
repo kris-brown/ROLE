@@ -1,321 +1,173 @@
-"""
-Various notions of maps between reason relations and algorithms for 
-finding them / verifying the naturality of purported maps.
-"""
 module RMaps 
-export RRelMap, is_natural, homomorphisms, homomorphism, RRelC, RRelC′, Interp
 
-using StructEquality
-using MLStyle: @match, @data
+export FMap, Cont, ContC, Open, OpenC, is_natural, naturality_failures, 
+       homomorphisms, preimage, terminal, initial, coproduct, product
+
+using ..ImpFrames
+using ..ImpFrames: impl_vec
+import ..ImpFrames: getvalue
+
 
 using GATlab
+using StructEquality
+using Combinatorics
 
-using ..RRels
-using ..RRels: intersects, contain, AbsRole, all_implications, role, containment
-
-const Maybe{T} = Union{T, Nothing}
-const ifilter = Iterators.filter
-const imap = Iterators.map
-
-"""
-A function on bearers. Should send good implications to good ones.
-"""
-@struct_hash_equal struct RRelMap 
-  fB::Vector{Int}
+"""Representation of a finite function"""
+@struct_hash_equal struct FMap
+  value::Vector{Int}
 end
 
-Base.length(r::RRelMap) = length(r.fB)
-Base.iterate(r::RRelMap, i...) = iterate(r.fB, i...)
+getvalue(f::FMap) = f.value
 
-(f::RRelMap)(i::BitSet) = f(collect(i))
-(f::RRelMap)(i::Union{Vector{Int},Int}) = f.fB[i]
-(f::RRelMap)(i::Implication) = Implication(f(i.prem), f(i.conc))
+"""Apply the function to a bearer"""
+(f::FMap)(i::Int) = getvalue(f)[i]
 
-""" 
-Is it the case that the action of the map sends all good inferences to good ones
-"""
-is_natural(f, dom::RRel, codom::RRel, m::Model) =
-  isempty(naturality_failures(m, f, dom, codom))
+"""Map an implication forward using the image of the function"""
+(f::FMap)(i::Impl{N}) where N = Impl(f.(prem(i)), f.(conc(i)), N)
 
-"""
-A map sending bearers to conceptual roles (i.e. RSRs of a subset of 
-*candidate* implications). We need not mention implications which satisfy 
-contraction because their RSR is the entire set of implications, such that 
-intersecting with them is a no-op.
-
-E.g. for a map X → Y, we specify a function X → 𝒫(𝒫(Y)²)
-"""
-@struct_hash_equal struct RoleMap
-  fB::Vector{<:AbsRole}
+"""Pull an implication backwards using the preimage of the function"""
+function preimage(f::FMap, impl::Impl, N::Int)::Impl{N}
+  Impl([i for i in 1:N if has_prem(impl, f(i))], 
+       [i for i in 1:N if has_conc(impl, f(i))], N)
 end
 
-RoleMap(xs::Vector{Any}) = RoleMap(Role.(xs))
 
-(f::RoleMap)(i::BitSet) = f(collect(i))
-(f::RoleMap)(i::Union{Int, AbstractVector{Int}}) = f.fB[i]
+# Things generic to all categories of Implication Frames
+########################################################
+abstract type IFrameCat <: Model{Tuple{ImpFrame, FMap}} end
+abstract type HomAlgorithm end 
+struct BruteForce <: HomAlgorithm end
 
-"""
-Pair of interpretation functions, sending bearers to their premisory role
-and their conclusory role. This is the data of a function X → 𝒫(𝒫(Y)²)²
-"""
-@struct_hash_equal struct Interp 
-  prem::RoleMap
-  conc::RoleMap
+""" Special naturality_failures method for each category """
+is_natural(m, f, d, c) = isempty(naturality_failures(m, f, d, c))
+
+initial(::IFrameCat) = ImpFrame(0)
+
+homomorphisms(X::IFrameCat, d::ImpFrame{N}, c::ImpFrame{M}, 
+              alg=BruteForce()) where {N,M} = homomorphisms(X, alg, d, c)
+
+"""Brute force algorithm"""
+function homomorphisms(X::IFrameCat, ::BruteForce, d::ImpFrame{N}, 
+                       c::ImpFrame{M}; monic=false, iso=false) where {N,M}
+  res, iter = FMap[], []
+
+  # Handle constraints
+  iter = []
+  if iso 
+    M == N || return res
+    iter = permutations(M)
+  elseif monic 
+    iter = combinations(1:M,N)
+  else 
+    iter = with_replacement_combinations(1:M,N)
+  end
+
+  for f in iter
+    is_natural(X, FMap(f), d, c) && push!(res, FMap(f))
+  end
+  res
 end
 
-Interp(a,b) = Interp(RoleMap(a), RoleMap(b))
-
-Interp(prem::AbstractVector{<:AbstractVector{Int}},
-       conc::AbstractVector{<:AbstractVector{Int}}
-      ) = Interp(RoleMap(prem), RoleMap(conc))
-
-""" 
-The interpretation of the domain lexicon into the codomain induces a reason
-relation.
-"""
-function ideal(i::Interp, codom::RRelRSR)::RRel
-  i⁺, i⁻ = i.prem, i.conc
-  N = length(i⁺.fB)
-  I = ifilter(containment(N)) do (Γ, Δ)
-    # println("Γ $(string(Γ)), Δ $(string(Δ))")
-    # println("\ti⁺(Γ) $(role.(i⁺(Γ)))")
-    # println("\ti⁻(Δ) $(role.(i⁻(Δ)))")
-    # println("\trole(⊔...)) $(role(⊔(codom, i⁺(Γ)..., i⁻(Δ)...)))")
-    RSR(codom, ⊔(codom, i⁺(Γ)..., i⁻(Δ)...)) ⊆ codom.I
-  end |> collect
-  RRel(N, I)
+""" Get a coproduct without specifying the distinguished good implications """
+function empty_coproduct(Xs::ImpFrame...)
+  bs = bearers.(Xs)
+  Σ = ImpFrame(sum(bs; init=0))
+  ιs = [FMap(i:j) for (i,j) in zip(cumsum([1,bs...]), cumsum(bs))]
+  return (Σ, ιs)
 end
 
-# Categories
-############
-struct RRelC <: Model{Tuple{RRel, RRelMap}} end
+"""Map into terminal object"""
+delete(c::IFrameCat, ::ImpFrame{N}) where N = (terminal(c), FMap(ones(Int, N)))
 
-@instance ThCategory{RRel, RRelMap} [model::RRelC] begin
-  Hom(f::RRelMap, d::RRel, c::RRel; model) =
+"""Map from initial object"""
+create(c::IFrameCat, ::ImpFrame) = (initial(c), Fmap(Int[]))
+
+universal(c::IFrameCat, c::Coproduct, csp::Cospan)::FMap
+
+# Category of Implication Frames and Continuous Maps
+####################################################
+
+"""
+A category where objects are implication frames and maps are functions 
+f: ℒₘ → ℒₙ between bearer sets which are required to satisfy the following 
+equation, for all good implications in 𝕀ₙ: f⁻¹(i) ∈ 𝕀ₘ
+"""
+struct Cont <: IFrameCat end
+const ContC = Cont()
+
+@instance ThCategory{ImpFrame, FMap} [model::Cont] begin
+  Hom(f::FMap, d::ImpFrame, c::ImpFrame; model) =
     is_natural(model, f, d, c) ? f : @fail join(
       naturality_failures(model, f, d, c), "\n")
 
-  id(rr::RRel) = RRelMap(collect(1:rr.N))
-  compose(f::RRelMap, g::RRelMap) = 
-    RRelMap(ThCategory.compose[FinSetC()](f.fB, g.fB))
+  id(rr::ImpFrame) = FMap(collect(1:bearers(rr)))
+  compose(f::FMap, g::FMap) = 
+    FMap(ThCategory.compose[FinSetC()](getvalue(f), getvalue(g)))
 end
 
-struct RRelC′ <: Model{Tuple{RRel, RRelMap}} end
+"""
+Check if a purported map satisfies the continuity constraint
+"""
+naturality_failures(::Cont, f::FMap, d::ImpFrame{N}, c::ImpFrame{M}) where {N,M} = 
+  filter(i -> preimage(f, impl_vec(M)[i], N) ∉ d, c) 
 
-@instance ThCategory{RRel, Interp} [model::RRelC′] begin
-  Hom(f::Interp, d::RRel, c::RRel; model) =
+terminal(::Cont) = ImpFrame(Pair[], 1)
+
+"""
+x ∈ 𝕀 of coproduct if ∀ i, ιᵢ⁻¹(x) ∈ 𝕀ᵢ
+"""
+function coproduct(::Cont, Xs::ImpFrame...)
+  Σ, ιs = empty_coproduct(Xs...)
+  for (idx, i) in enumerate(impl_vec(bearers(Σ)))
+    all(((ι, X),)-> preimage(ι, i, bearers(X)) ∈ X, zip(ιs, Xs)) && push!(Σ, idx)
+  end
+  return (Σ, ιs)
+end 
+
+# Category of Implication Frames and Open Maps
+####################################################
+
+"""
+A category where objects are implication frames and maps are functions 
+f: ℒₘ → ℒₙ between bearer sets which are required to satisfy the following 
+equation, for all good implications in 𝕀ₘ: f(i) ∈ 𝕀ₙ
+"""
+struct Open <: IFrameCat end
+const OpenC = Open()
+
+@instance ThCategory{ImpFrame, FMap} [model::Open] begin
+  Hom(f::FMap, d::ImpFrame, c::ImpFrame; model) =
     is_natural(model, f, d, c) ? f : @fail join(
       naturality_failures(model, f, d, c), "\n")
 
-  id(rr::RRel) = Interp(collect(1:rr.N))
-  compose(f::Interp, g::Interp) = error("TODO")
+  id(rr::ImpFrame) = FMap(collect(1:bearers(rr)))
+  compose(f::FMap, g::FMap) = 
+    FMap(ThCategory.compose[FinSetC()](getvalue(f), getvalue(g)))
 end
 
-# Naturality 
-############
+"""
+Check if a purported map satisfies the continuity constraint
+"""
+naturality_failures(::Open, f::FMap, d::ImpFrame{N}, c::ImpFrame{M}) where {N,M} = 
+  filter(i -> f(impl_vec(M)[i]) ∉ d, c)
+
+
+terminal(::Open) = ImpFrame([[]=>[1],[1]=>[],[1]=>[1]], 1)
 
 """
-Find examples where Γ⊢Δ but f(Γ)⊬f(Δ)
+𝕀 of coproduct is equal to ⋃ ιᵢ(𝕀ᵢ)
 """
-function naturality_failures(::RRelC, r::RRelMap, dom::RRel, codom::RRel)
-  # Error if map is syntactically malformed
-  length(r) == length(dom) || error("Bad map length")
-  all(>(0), r.fB) || error("Out of bounds")
-  maximum(r; init=0) ≤ length(codom) || error("out of bounds")
-  # Find naturality failures
-  res = String[]
-  for ΓΔ in dom.I
-    rΓΔ = r(ΓΔ) 
-    if !(contain(rΓΔ) || rΓΔ ∈ codom.I)
-      push!(res, "Dom: " * string(ΓΔ) * " Codom: " * replace(string(rΓΔ), "⊢" => "⊬"))
+function coproduct(::Open, Xs::ImpFrame...)
+  Σ, ιs = empty_coproduct(Xs...)
+  for (ι, X) in zip(ιs, Xs)
+    for j ∈ X 
+      push!(Σ, ι(impl_vec(bearers(X))[j]))
     end
   end
-  return res
-end
-
-
-"""
-Find examples where  ⟦Γ⟧ ⊢ ⟦Δ⟧ but Γ⊬Δ
-"""
-function naturality_failures(::RRelC′, r::RRelMap, dom::RRel, codom::RRel)
-  error("TODO")
-end
-
-# Homomorphism search
-#####################
-abstract type BacktrackingState end 
-
-function homomorphism(X::RRelRSR, Y::RRelRSR; cat=RRelC(), kw...)
-  result = nothing
-  backtracking_search(cat, X, Y; kw...) do α
-    result = α; return true
-  end
-  return result
-end
-
-function homomorphisms(X::RRelRSR, Y::RRelRSR; 
-                       cat::Model{Tuple{RRel,Hom}}=RRelC(), kw...)  where {Hom}
-  results = Hom[]
-  backtracking_search(cat, X, Y; kw...) do α
-    push!(results, deepcopy(α)); return false
-  end
-  return results
-end
-
-""" Main loop of backtracking search """
-function backtracking_search(f, cat::Model, state::BacktrackingState, depth::Int) 
-  # Choose the next unassigned element.
-  mrv, x, options = find_mrv_elem(cat, state, depth)
-  if isnothing(x)
-    return f(RRelMap(state.assignment))
-  elseif mrv == 0
-    return false # No allowable assignment, so we must backtrack.
-  end
-  # Attempt all assignments of the chosen element.
-  for y in options
-    (assign_elem!(cat, state, depth, x, y) 
-    && backtracking_search(f, cat, state, depth + 1)) && return true
-    unassign_elem!(cat, state, depth, x)
-  end
-  return false
-end
-
-""" Find the most constrained element """
-function find_mrv_elem(cat::Model, state::BacktrackingState, depth::Int 
-                      )::Tuple{Number, Maybe{Int},Maybe{Vector{Int}}}
-  Ny = length(state.codom)
-  mrv, mrv_elem, options = Inf, nothing, nothing
-  for x in 1:length(state.dom)
-    state.assignment[x] == 0 || continue
-    x_opts = filter(y -> can_assign_elem(cat, state, depth, x, y), 1:Ny)
-    if length(x_opts) < mrv
-      mrv, mrv_elem, options = length(x_opts), x, x_opts
-    end
-  end
-  return (mrv, mrv_elem, options)
-end
-
-# Nonmutating overall, but we temporarily mutate the backtracking state.
-function can_assign_elem(cat::Model, state::BacktrackingState, depth::Int, 
-                         x::Int, y::Int)::Bool
-  ok = assign_elem!(cat, state, depth, x, y)
-  unassign_elem!(cat, state, depth, x)
-  return ok
-end
-
-# RRelC-specific
-#---------------
-
-"""
-assignment: the partially-specified mapping of bearers (0 = unspecified)
-possibilities: assigning for each good inference in the domain what good 
-               (non-containment) inferences in the codomain could be mapped to, 
-               given the current assignment.
-"""
-struct RRelBacktrackingState <: BacktrackingState
-  dom::RRelRSR
-  codom::RRelRSR
-  assignment::Vector{Int}
-  assignment_depth::Vector{Int}
-  # possibilities::Vector{BitSet}
+  return (Σ, ιs)
 end 
 
-(s::BacktrackingState)(i::Int) = s.assignment[i]
 
-"""
-Search the space of functions Yˣ of functions from bearers of X to bearers of Y.
-"""
-function backtracking_search(f, cat::RRelC, X::RRelRSR, Y::RRelRSR; kw...)
-  state = RRelBacktrackingState(X, Y, zeros(Int, length(X)), zeros(Int, length(X))
-                           ) # init_possibilities(X, Y)
-  backtracking_search(f, cat, state, 1)
-end
 
-""" Initialize `possibilities` for BacktrackingState """
-function init_possibilities(X::RRelRSR, Y::RRelRSR)
-  imap((X.I)) do i
-    (Γ, Δ) = X[i]
-    BitSet(imap(last, ifilter(pairs(Y.inv_implication)) do ((X,Y), j) 
-      isempty(X) && !isempty(Γ) && return false
-      isempty(Y) && !isempty(Δ) && return false
-      length(Γ) ≥ length(X) && length(Δ) ≥ length(Y) 
-    end))
-  end
-end
-
-function assign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, 
-                      x::Int, y::Int)::Bool
-  y′ = state.assignment[x]
-  y′ == y && return true  # If x is already assigned to y, return immediately.
-  y′ == 0 || return false # Otherwise, x must be unassigned.
-
-  # Make the assignment and recursively assign subparts.
-  state.assignment[x] = y
-  state.assignment_depth[x] = depth
-  # every good (Γ⊢Δ) in X which x figures into is a constraint
-  for i in state.dom.goodprem[x] ∪state.dom.goodconc[x]
-    ΓΔ = state.dom[i]
-    fΓ, fΔ = state.(ΓΔ.prem), state.(ΓΔ.conc)
-    intersects(fΓ, fΔ) && continue # possible to satisfy containment
-    # What are the possible good inferences this could be sent to?
-    fΓzs, fΔzs = count.(==(0), [fΓ, fΔ])
-    fΓnz, fΔnz = filter.(!=(0), [fΓ, fΔ])
-    y_poss = ifilter(state.codom.I) do j
-      XY = state.codom[j]
-      !isempty(XY.prem) || isempty(ΓΔ.prem) || return false
-      !isempty(XY.conc) || isempty(ΓΔ.conc) || return false
-      fΓnz ⊆ XY.prem || return false
-      fΔnz ⊆ XY.conc || return false
-      length(setdiff(XY.prem, fΓnz)) ≤ fΓzs || return false
-      length(setdiff(XY.conc, fΔnz)) ≤ fΔzs || return false
-      return true
-    end |> collect
-    isempty(y_poss) && return false
-  end
-  return true
-end
-
-function unassign_elem!(::RRelC, state::RRelBacktrackingState, depth::Int, 
-                        x::Int)::Nothing
-  state.assignment[x] == 0 && return nothing
-  assign_depth = state.assignment_depth[x]
-  @assert assign_depth <= depth
-  if assign_depth == depth
-    state.assignment[x] = 0
-    state.assignment_depth[x] = 0
-  end
-  return nothing
-end
-
-# Interpretation function search
-#--------------------------------
-
-"""
-assignment: the partially-specified mapping of bearers (0 = unspecified)
-"""
-struct InterpBacktrackingState <: BacktrackingState
-  dom::RRelRSR
-  codom::RRelRSR
-  assignment::Matrix{Bool}
-  assignment_depth::Matrix{Int}
-end 
-
-"""
-Search the space of functions Yˣ of functions from bearers of X to bearers of Y.
-"""
-function backtracking_search(cat::Interp, f, X::RRelRSR, Y::RRelRSR; kw...)
-  state = InterpBacktrackingState(X, Y, zeros(Int, length(X)), zeros(Int, length(X)))
-  backtracking_search(cat, f, state, 1)
-end
-
-function assign_elem!(::Interp, state::InterpBacktrackingState, depth::Int, 
-                      x::Int, y::Int)::Bool
-  error("TODO")
-end
-
-function unassign_elem!(::Interp, state::InterpBacktrackingState, depth::Int, 
-                        x::Int)::Nothing
-  error("TODO")
-end
 
 end # module
