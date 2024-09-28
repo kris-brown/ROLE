@@ -5,8 +5,8 @@ premises and conclusions.
 """
 module ImpFrames
 export ImpFrame, Impl, bearers, prem, conc, has_prem, has_conc, ImplSet, 
-       RoleLattice ,getvalue, rsr, 
-       ⊗, ⊔, ⊓, ¬, →, ∨, ∧, ⪯
+       RoleLattice ,getvalue, rsr, Content, contents, getcontent, Role,
+       ⊗, ⊔, ⊓, ¬, →, ∨, ∧, ⪯, ⊩, impl_dict, impl_vec
 
 using StructEquality, Combinatorics, PrettyTables, Random
 using StatsBase: sample
@@ -73,6 +73,8 @@ has_prem(i::Impl, x::Int) = x*2-1 ∈ i
 
 has_conc(i::Impl, x::Int) = x*2 ∈ i
 
+overlap(i::Impl) = !isempty(prem(i) ∩ conc(i))
+
 function Base.show(io::IO, ::MIME"text/plain", i::Impl{N}) where N
   print(io, "$(join(prem(i),",")) ⊢ $(join(conc(i),","))")
 end
@@ -91,11 +93,18 @@ Base.union(i::Impl{N}...) where N = union(collect(i))
 Base.union!(i::Impl{N}, j::Impl{N}...) where N = 
   union!(getvalue(i), getvalue.(j)...)
 
+function Base.replace(i::Impl{N}, p::Pair{Int,Int})::Impl{N} where N
+  Impl(replace(prem(i), p), replace(conc(i), p), N)
+end
+
 # Caching a linear order of implications
 ########################################
 
 """Cache, for a given L, the bidirectional mapping of 𝒫(L+L) to implications"""
 const ImpDict = Dict{Int, Pair{Vector{Impl}, Dict{Impl, Int}}}()
+
+"""Cache which implications are implied to be good by containment"""
+const CONTAINMENT = Dict{Int, BitSet}()
 
 """ 
 Get the i'th implication in the ordered set of all possible implications, 𝒫(L+L)
@@ -118,8 +127,10 @@ Compute an order on the set of possible implications on `i` bearers.
 """
 function compute_impldict!(i::Int)::Pair{Vector{Impl}, Dict{Impl, Int}}
   imps = Impl{i}.(BitSet.(Vector{Int}.(powerset(1:2*i))))
+  CONTAINMENT[i] = BitSet([i for (i,j) in enumerate(imps) if overlap(j)])
   ImpDict[i] = imps => Dict(j=>i for (i,j) in enumerate(imps))
 end
+
 
 # Sets of implications 
 ######################
@@ -136,20 +147,25 @@ some number of bearers, N, this data is captured by a BitSet.
 end 
 
 ImplSet(v::AbstractVector{Int}, N::Int) = ImplSet{N}(BitSet(v))
+
 ImplSet(v::AbstractVector{Impl{N}}) where N = 
   ImplSet{N}(BitSet(getindex.(Ref(impl_dict(N)), v)))
 
+ImplSet(i::Impl{N}) where N = ImplSet([i])
 
 bearers(::ImplSet{N}) where N = N
+
 is_top(i::ImplSet{N}) where N = length(i) == 2^(2*N)
+
 top(i::Int) = ImplSet{i}(BitSet(1:2^(2*i)))
+
 top(::Type{ImplSet{N}}) where N = top(N)
 
 Base.union(i::Vector{ImplSet{N}}) where N = 
   ImplSet{N}(isempty(i) ? BitSet() : union(getvalue.(i)...))
+
 Base.intersect(i::Vector{ImplSet{N}}) where N = 
   isempty(i) ? top(N) : ImplSet{N}(intersect(getvalue.(i)...))
-
 
 function Base.show(io::IO, ::MIME"text/plain", i::ImplSet{N}) where N
   str = ["($(string(impl_vec(N)[x])))" for x in getvalue(i)]
@@ -162,12 +178,11 @@ Base.string(i::ImplSet) = sprint(show, "text/plain", i)
 Quantale monoidal operation for 𝒫(S) where (S, 0, ∪) is a monoid.
 """
 function ⊗(xs::Vector{ImplSet{N}})::ImplSet{N} where N
-  isempty(xs) && return ImplSet([Impl{2}()]) # unit of the ⊗ operation
+  isempty(xs) && return ImplSet([Impl{N}()]) # unit of the ⊗ operation
   map(collect.(iproduct(xs...))) do imp_tuple # iterate over cartesian product
     union(impl_vec(N)[imp_tuple]) # union the corresponding implications
   end |> vec |> Vector{Impl{N}} |> ImplSet
 end
-
 
 ⊗(xs::ImplSet{N}...) where N = ⊗(collect(xs))
 
@@ -180,13 +195,19 @@ Most basic representation of an implication frame on a set of bearers 1:N
 The distinguished subset of good implications (incoherent sets of acceptances 
 and rejections) 𝕀 is stored in the `value` field.
 """
-@struct_hash_equal struct ImpFrame{N} <: BitSetWrapper
-  value::BitSet
+struct ImpFrame{N} <: BitSetWrapper
+  value::ImplSet{N}
   names::Vector{Symbol}
 
-  ImpFrame{N}(I, names::Maybe{Vector{Symbol}}=nothing) where N = 
-    new{N}(I, isnothing(names) ? Symbol.(string.(1:N)) : names)
+  function ImpFrame{N}(I, names::Maybe{Vector{Symbol}}=nothing) where N
+    iframe = new{N}(I, isnothing(names) ? Symbol.(string.(1:N)) : names)
+    RoleLattice(iframe) # compute this automatically and cache
+    iframe
+  end
 end
+
+Base.:(==)(i::ImpFrame{N}, j::ImpFrame{N}) where N = getvalue(i) == getvalue(j)
+Base.hash(i::ImpFrame) = hash(getvalue(i))
 
 """
 Give an implication frame via a list of sequents.
@@ -195,12 +216,22 @@ We assume the empty sequent is in this set.
 
 Optionally specify the size of L
 """
-function ImpFrame(xs::AbstractVector{<:Pair}, N=nothing, names=nothing)
+function ImpFrame(xs::AbstractVector{<:Pair}, N::Int; names=nothing, containment=false)
   N = isnothing(N) ? max(collect(iflatten(iflatten(xs)))...) : N # default to max
   id = impl_dict(N)
   I = BitSet([id[Impl(x...,N)] for x in xs])
+  containment && union!(I, CONTAINMENT[N])
   push!(I, 1) # assume empty sequent
-  ImpFrame{N}(I, names)
+  ImpFrame{N}(ImplSet{N}(I), names)
+end
+
+
+function ImpFrame(xs::AbstractVector{<:Pair}, names::AbstractVector{Symbol}; containment=false)
+  dic = Dict(k=>v for (v, k) in enumerate(names))
+  xs′ = map(xs) do (p, c)
+    getindex.(Ref(dic), p) => getindex.(Ref(dic), c)
+  end
+  ImpFrame(xs′, length(names); names, containment)
 end
 
 bearers(::ImpFrame{N}) where N = N
@@ -224,11 +255,23 @@ function ImpFrame(B::Int, names=nothing; random=false)
     Int[]
   end
   push!(I, 1)
-  ImpFrame{B}(BitSet(I), names)
+  ImpFrame{B}(ImplSet{B}(BitSet(I)), names)
 end
 
 Base.in(i::Impl, r::ImpFrame) = impl_dict(bearers(r))[i] ∈ r
+
 Base.push!(r::ImpFrame, i::Impl) = push!(r, impl_dict(bearers(r))[i])
+
+Impl(p::Union{Vector{Any},AbstractVector{Int}}, 
+     c::Union{Vector{Any},AbstractVector{Int}}, 
+     ::ImpFrame{N}) where N = Impl(p, c, N)
+
+Impl(p::Union{Vector{Any},AbstractVector{Symbol}}, 
+     c::Union{Vector{Any},AbstractVector{Symbol}}, 
+     i::ImpFrame{N}) where N = Impl(i.(p), i.(c), N)
+
+"""Convert a symbol to an integer via lookup in the names vector"""
+(i::ImpFrame)(s::Symbol)::Int = findfirst(==(s), i.names)
 
 """
 The RSR of an implication is the set of implications which, when unioned 
@@ -255,12 +298,15 @@ a `RoleLattice`).
 The indices in the Role only makes sense w/r/t a role lattice of some 
 particular implication frame, given as a type parameter.
 """
-@struct_hash_equal struct Role{ImpFrame} <: BitSetWrapper
+@struct_hash_equal struct Role{F} <: BitSetWrapper
   value::BitSet
+  Role{F}(v::BitSet) where F = new{F}(v)
 end
 
 ImplSet(atoms::Vector{<:ImplSet}, r::Role) = intersect(atoms[collect(r)])
+
 ImplSet(r::Role{F}) where F =  ImplSet(get_lattice(F).atoms, r)
+
 rsr(r::Role{F}) where F = rsr(get_frame(F), ImplSet(r))
 
 # Role Lattices
@@ -295,7 +341,6 @@ We cache a forward map: S → Role and an inverse map: AtomRole → 𝒫(S).
     # Check if we've computed this before
     key = hash(f)
     haskey(RoleDict, key) && return get_lattice(key)
-  
     # Compute roles of all candidate implications
     all_rsrs = rsr.(Ref(f), impl_vec(N))
   
@@ -316,16 +361,27 @@ We cache a forward map: S → Role and an inverse map: AtomRole → 𝒫(S).
   end
 end
 
-Role(lat::RoleLattice) = Role{lat}(BitSet())
-
-# Caching roles of an implication frame
+"""Caching roles of an implication frame"""
 const RoleDict = Dict{UInt64, Pair{ImpFrame, RoleLattice}}()
+
 get_frame(u::UInt64) = RoleDict[u][1]
+
 get_lattice(u::UInt64) = RoleDict[u][2]
 
-""" Compute the role lattice """
+function get_lattice(i::ImpFrame) 
+  h = hash(i)
+  if haskey(RoleDict, h) 
+    get_lattice(h)
+  else 
+    RoleLattice(i)
+  end
+end
 
+""" Compute the role lattice """
 Base.length(rl::RoleLattice{T}) where T = length(rl.atoms)
+
+"""Is an implication contained in the role"""
+Base.in(i::Impl{N}, rl::Role) where N = impl_dict(N)[i] ∈ ImplSet(rl)
 
 """
 Factor an arbitrary role ImplSet into a finite intersection of roles
@@ -361,19 +417,35 @@ end
 
 (rlat::RoleLattice)(iset::ImplSet; check=true) = factor(rlat, iset; check)
 
+(rlat::RoleLattice)(i::Impl; check=true) = factor(rlat, ImplSet(i); check)
+
+
+prem_role(i::ImpFrame{N}, a::Int) where N = let rlat = get_lattice(i);
+  rlat(rsr(i, Impl([a], Int[], N)))
+end
+
+conc_role(i::ImpFrame{N}, a::Int) where N = let rlat = get_lattice(i);
+  rlat(rsr(i, Impl(Int[], [a], N)))
+end
+
 # Operations on roles
 #--------------------
 
 # "Symjunction" i.e. intersection
 ⊓(r1::Role{F}, r2::Role{F}) where F = ⊓([r1,r2])
-⊓(rs::AbstractVector{Role{F}}) where F = Role{F}(∩(getvalue.(rs)))
+
+# Intersecting the sets is unioning the generators which are implicitly 
+# intersected to obtain the implicit implication set
+⊓(rs::AbstractVector{Role{F}}) where F = Role{F}(∪(getvalue.(rs)...))
 
 
 # "Adjunction" i.e. monoidal product dual to rsr²(- ⊗ -)
 ⊔(r1::Role{F}, r2::Role{F}) where F = ⊔([r1,r2])
 
-function ⊔(rs::AbstractVector{Role{F}})::Role{F} where F 
-  get_lattice(F)(rsr(get_frame(F), ⊗(rsr.(rs))))
+function ⊔(rs::AbstractVector{Role{F}})::Role{F} where F
+  f = get_frame(F)
+  N = bearers(f)
+  get_lattice(F)(rsr(get_frame(F), ⊗(ImplSet{N}[rsr.(rs)...])))
 end
 
 # Implicational role inclusion
@@ -388,13 +460,25 @@ end
 # Conceptual contents 
 #####################
 
+
 @struct_hash_equal struct Content{F}
   prem::Role{F}
   conc::Role{F}
 end
 
-prem(c::Content) = c.prem 
-conc(c::Content) = c.conc
+"""Accessor function"""
+function prem(c::Content{F})::Role{F} where F 
+  c.prem 
+end
+
+"""Accessor function"""
+function conc(c::Content{F})::Role{F} where F 
+  c.conc
+end
+
+getcontent(i::ImpFrame, a::Int) = Content(prem_role(i, a), conc_role(i, a))
+
+contents(i::ImpFrame{N}) where N = [getcontent(i, a) for a in 1:N]
 
 Base.iterate(c::Content, i...) = iterate((prem(c), conc(c)), i...)
 
@@ -414,5 +498,19 @@ function ∨(a::Content{F}, b::Content{F}) where F
   ((a⁺, a⁻), (b⁺, b⁻)) = (a, b)
   Content{F}(a⁺ ⊓ b⁺ ⊓ (a⁺ ⊔ b⁺), a⁻ ⊔ b⁻) 
 end
+
+"""
+Content entailment for lists of conceptual contents Γ and Δ
+
+⟦Γ⟧ ⊩ ⟦Δ⟧ := ⟦Γ⟧⁺ ⊔ ⟦Δ⟧⁻ ⊆ 𝕀
+"""
+function ⊩(x::AbstractVector{Content{F}}, y::AbstractVector{Content{F}}) where {F}
+  f = get_frame(F)
+  v = ⊔(Role{F}[prem.(x)..., conc.(y)...])
+  rsr(f,ImplSet(v)) ⊆ getvalue(f)
+end
+
+⊩(x::Content{F}, y::Content{F}) where F = [x] ⊩ [y]
+
 
 end #module

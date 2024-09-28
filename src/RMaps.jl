@@ -1,16 +1,99 @@
 module RMaps 
 
 export FMap, Cont, ContC, Open, OpenC, is_natural, naturality_failures, 
-       homomorphisms, preimage, terminal, initial, coproduct, product
+       homomorphisms, preimage, terminal, initial, coproduct, product, 
+       Interp, sound, soundness_failures, interps, sound_dom
 
 using ..ImpFrames
-using ..ImpFrames: impl_vec
-import ..ImpFrames: getvalue
+using ..ImpFrames: impl_vec, get_frame
+import ..ImpFrames: getvalue, prem, conc
 
 
 using GATlab
 using StructEquality
 using Combinatorics
+using StaticArrays
+
+
+"""
+Interpretation function: sends bearers to conceptual contents
+"""
+@struct_hash_equal struct Interp{N, Cod}
+  value::SVector{N, Content{Cod}}
+  Interp(v::AbstractVector{Content{C}}) where C = new{length(v), C}(SVector(v...))
+end
+
+getvalue(i::Interp) = i.value
+
+
+function (f::Interp{N,Cod})(i::Int)::Content{Cod} where {N,Cod} 
+  getvalue(f)[i] 
+end
+
+"""Compute the content entailment of an implication"""
+function (f::Interp{N,Cod})(i::Impl{N}) where {N,Cod}
+  f.(prem(i)) ⊩ f.(conc(i))
+end
+
+sound(f::Interp{N, Cod}, dom::ImpFrame{N}) where {N, Cod} = 
+  isempty(soundness_failures(f, dom))
+
+
+"""The domain of an interpretation, if it were sound"""
+function sound_dom(f::Interp{N, Cod})::ImpFrame{N} where {N, Cod}
+  ImpFrame{N}(BitSet([idx for (idx, i) in enumerate(impl_vec(N)) 
+                      if f(i)]) |> ImplSet{N})
+end
+
+""" 
+`first` means only return the first failure
+"""
+function soundness_failures(f::Interp{N, Cod}, dom::ImpFrame{N}; first=false) where {N, Cod}
+  cod = get_frame(Cod)
+  res = []
+  for imp in impl_vec(N)
+    # println("$(string(imp)) -> $(imp ∈ dom)")
+    if (imp ∈ dom) != f(i) 
+      first && return [imp]
+      push!(res, imp)
+    end
+  end
+  res
+end
+
+"""
+Enumerate sound interpretation functions by brute force.
+"""
+function interps(dom::ImpFrame{N}, cod::ImpFrame) where N
+  r = RoleLattice(cod)
+  F = hash(cod)
+  res = Interp[]
+  badprem, badconc = Set(),Set()
+  pset = Iterators.product(fill(powerset(eachindex(r.atoms)), 2)...)
+  for ats in Iterators.product(fill(pset, N)...)
+    @show ats
+    f = Interp(map(ats) do (p, c)
+      Content(Role{F}(BitSet(p)), Role{F}(BitSet(c)))
+    end |> collect)
+    fails = soundness_failures(f, dom; first=true)
+
+    if isempty(fails)
+      println("FOUND ONE!") && push!(res, f)
+    else  # learn why it was wrong, prevent that same assignment
+      fail = only(fails)
+      push!(badprem, [p => ats[p][1] for p in prem(fail)])
+      push!(badconc, [p => ats[p][1] for p in conc(fail)])
+      @show string(fail)
+      @show badprem 
+      @show badconc 
+      error("HERE")
+    end
+  end
+  return res
+end
+
+# Finite functions
+##################
 
 """Representation of a finite function"""
 @struct_hash_equal struct FMap
@@ -82,7 +165,8 @@ delete(c::IFrameCat, ::ImpFrame{N}) where N = (terminal(c), FMap(ones(Int, N)))
 """Map from initial object"""
 create(c::IFrameCat, ::ImpFrame) = (initial(c), Fmap(Int[]))
 
-universal(c::IFrameCat, c::Coproduct, csp::Cospan)::FMap
+# universal(i::IFrameCat, c::Coproduct, csp::Cospan)::FMap = error("undefined")
+
 
 # Category of Implication Frames and Continuous Maps
 ####################################################

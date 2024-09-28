@@ -27,7 +27,7 @@ Z = ImplSet([Impl([],[2])])
 # Reason relations
 ##################
 
-rrel = ImpFrame([[]=>[1], [1,2]=>[], [1]=>[2]], 2, [:a,:b]);
+rrel = ImpFrame([[]=>[1], [1,2]=>[], [1]=>[2]], 2; names=[:a,:b]);
 @test string(rrel) |> strip ==  """
 |     |   | a | b | a,b |
 |-----|---|---|---|-----|
@@ -43,7 +43,7 @@ empty_rrel = ImpFrame(3)
 rand_rrel = ImpFrame(3; random=true)
 @test !isempty(rand_rrel) # most likely true
 
-@test string(rsr(rrel, Impl([],[1], 2))) == "{( ⊢ ),( ⊢ 1)}"
+@test string(rsr(rrel, Impl([], [1], rrel))) == "{( ⊢ ),( ⊢ 1)}"
 
 # Role lattices
 ###############
@@ -64,10 +64,71 @@ for _ in 1:10
   r1, r2 = rlattice.(rsr.(Ref(rrel), is))
   r1r2 = rlattice(rsr(rrel, is1 ⊗ is2))
   @test r1r2 == r1 ⊔ r2
-end 
+
+  c1, c2 = Content(r1, r2), Content(r2,r2)
+  @test (c1 → c2) == (¬c1 ∨ c2) # check logical tautology
+end
 
 for i in 1:10
   rlattice = RoleLattice(ImpFrame(4; random=false))
 end # no errors when processing larger ones
+
+
+# Blog example
+##############
+
+"""
+q = 'Zazzles the cat has four legs', 
+r = 'Zazzles the cat lost a leg'
+"""
+C = ImpFrame([[]=>[:q], []=>[:q,:r], [:q,:r]=>[]], [:q,:r]; containment=true)
+
+"""
+x = 'It started in state 𝓈', 
+y = 'It is presently in state 𝓈', 
+z = 'There has been a net change in state'
+"""
+S = ImpFrame([[:x]=>[:y], [:x]=>[:y,:z], [:x,:y,:z]=>[]], [:x,:y,:z]; containment=true)
+x,y,z = contents(S)
+f_and = Interp([x ∧ y, x ∧ z])
+sound_dom(f_and)
+f_imp = Interp([x → y, x → z])
+sound_dom(f_imp) # this is close to C except for q,r ⊬ 
+
+# Empty role
+rₑ = Role{hash(S)}(BitSet(1))
+empt = Interp(fill(Content(rₑ, rₑ), 2))
+@test length(getvalue(sound_dom(empt))) == 16 # 𝕀 = 𝒫(ℒ+ℒ)
+
+
+
+
+# Sending q ↦ 𝐱 ∧ 𝐲 and r ↦ 𝐱 ∧ 𝐳
+#--------------------------------
+D = ImpFrame([[]=>[1], []=>[2], []=>[1,2], []=>[1,3],
+              []=>[2,3],[]=>[1,2,3],[1,2,3]=>[]], 3; 
+              containment=true, names=[:x,:y,:z])
+𝐱, 𝐲, 𝐳 = contents(D) 
+∅ = typeof(𝐱)[]
+@test ∅ ⊩ [𝐱 ∧ 𝐲]
+@test !(∅ ⊩ [𝐱 ∧ 𝐳])
+@test !(∅ ⊩ [𝐱 ∧ 𝐲 ∧ 𝐳])
+
+@test sound_dom(Interp([𝐱 ∧ 𝐲, 𝐱 ∧ 𝐳])) == C
+
+
+# Sending q ↦ 𝐱 → 𝐲 and r ↦ 𝐱 → 𝐳
+#--------------------------------
+D = ImpFrame([[]=>[1], [1]=>[2], [1]=>[2,3], [2]=>[1],
+              [3]=>[1],[2,3]=>[],[2,3]=>[1]], 3; 
+              containment=true, names=[:x,:y,:z])
+𝐱, 𝐲, 𝐳 = contents(D) 
+∅ = typeof(𝐱)[]
+@test !(∅ ⊩ [𝐱 ∧ 𝐲])
+@test ∅ ⊩ [𝐱 → 𝐲]
+@test !(∅ ⊩ [𝐱 → 𝐳])
+
+@test sound_dom(Interp([𝐱 → 𝐲, 𝐱 → 𝐳])) == C
+
 
 end # module
