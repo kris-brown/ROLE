@@ -109,18 +109,12 @@ const CONTAINMENT = Dict{Int, BitSet}()
 """ 
 Get the i'th implication in the ordered set of all possible implications, 𝒫(L+L)
 """
-function impl_vec(i::Int)::Vector{Impl{i}}
-  haskey(ImpDict, i) && return ImpDict[i][1]
-  compute_impldict!(i)[1]
-end
+@inline impl_vec(i::Int) = ImpDict[i][1]
 
 """
 Get the (linear) index of a particular implication in the ordered set 𝒫(L+L)
 """
-function impl_dict(i::Int)::Dict{Impl{i},Int}
-  haskey(ImpDict, i) && return ImpDict[i][2]
-  compute_impldict!(i)[2]
-end
+@inline impl_dict(i::Int) = ImpDict[i][2]
 
 """
 Compute an order on the set of possible implications on `i` bearers.
@@ -179,8 +173,13 @@ Quantale monoidal operation for 𝒫(S) where (S, 0, ∪) is a monoid.
 """
 function ⊗(xs::Vector{ImplSet{N}})::ImplSet{N} where N
   isempty(xs) && return ImplSet([Impl{N}()]) # unit of the ⊗ operation
+  v = impl_vec(N)
   map(collect.(iproduct(xs...))) do imp_tuple # iterate over cartesian product
-    union(impl_vec(N)[imp_tuple]) # union the corresponding implications
+    i = Impl{N}()
+    for it in imp_tuple 
+      union!(i, v[it])
+    end
+    i 
   end |> vec |> Vector{Impl{N}} |> ImplSet
 end
 
@@ -201,6 +200,7 @@ struct ImpFrame{N} <: BitSetWrapper
 
   function ImpFrame{N}(I, names::Maybe{Vector{Symbol}}=nothing) where N
     iframe = new{N}(I, isnothing(names) ? Symbol.(string.(1:N)) : names)
+    haskey(ImpDict, N) || compute_impldict!(N) # compute this and cache
     RoleLattice(iframe) # compute this automatically and cache
     iframe
   end
@@ -218,6 +218,7 @@ Optionally specify the size of L
 """
 function ImpFrame(xs::AbstractVector{<:Pair}, N::Int; names=nothing, containment=false)
   N = isnothing(N) ? max(collect(iflatten(iflatten(xs)))...) : N # default to max
+  haskey(ImpDict, N) || compute_impldict!(N) # compute this and cache
   id = impl_dict(N)
   I = BitSet([id[Impl(x...,N)] for x in xs])
   containment && union!(I, CONTAINMENT[N])

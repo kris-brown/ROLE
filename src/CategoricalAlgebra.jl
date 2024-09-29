@@ -1,3 +1,7 @@
+"""
+This is very much a work in progress. An attempt to extract relevant ideas from 
+Catlab.jl.
+"""
 module CategoricalAlgebra 
 
 export dom, codom

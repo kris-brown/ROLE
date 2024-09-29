@@ -5,7 +5,7 @@ export FMap, Cont, ContC, Open, OpenC, is_natural, naturality_failures,
        Interp, sound, soundness_failures, interps, sound_dom
 
 using ..ImpFrames
-using ..ImpFrames: impl_vec, get_frame
+using ..ImpFrames: impl_vec, get_frame, ImpDict, compute_impldict!
 import ..ImpFrames: getvalue, prem, conc
 
 
@@ -16,7 +16,8 @@ using StaticArrays
 
 
 """
-Interpretation function: sends bearers to conceptual contents
+Interpretation function: sends bearers of some ImpFrame{N} to conceptual 
+contents in some Cod::ImpFrame.
 """
 @struct_hash_equal struct Interp{N, Cod}
   value::SVector{N, Content{Cod}}
@@ -25,31 +26,41 @@ end
 
 getvalue(i::Interp) = i.value
 
-
+""" Calling interpretation on a bearer (i.e. integer) indexes the function """
 function (f::Interp{N,Cod})(i::Int)::Content{Cod} where {N,Cod} 
   getvalue(f)[i] 
 end
 
-"""Compute the content entailment of an implication"""
+"""
+Compute whether content entailment of an implication holds under the 
+interpretation
+"""
 function (f::Interp{N,Cod})(i::Impl{N}) where {N,Cod}
   f.(prem(i)) ⊩ f.(conc(i))
 end
 
+""" 
+Determine whether all candidate implications in some domain are good (or bad) in
+accordance with content entailment under an interpretation
+"""
 sound(f::Interp{N, Cod}, dom::ImpFrame{N}) where {N, Cod} = 
   isempty(soundness_failures(f, dom))
 
 
-"""The domain of an interpretation, if it were sound"""
+"""The unique domain of an interpretation, taking it to be sound"""
 function sound_dom(f::Interp{N, Cod})::ImpFrame{N} where {N, Cod}
+  haskey(ImpDict, N) || compute_impldict!(N) # compute this and cache
   ImpFrame{N}(BitSet([idx for (idx, i) in enumerate(impl_vec(N)) 
                       if f(i)]) |> ImplSet{N})
 end
 
 """ 
-`first` means only return the first failure
+Find all candidate domain implications for which the goodness of the inference
+does 𝐧𝐨𝐭 match content entailment.
+
+`first` means stop when the first failure is found.
 """
 function soundness_failures(f::Interp{N, Cod}, dom::ImpFrame{N}; first=false) where {N, Cod}
-  cod = get_frame(Cod)
   res = []
   for imp in impl_vec(N)
     # println("$(string(imp)) -> $(imp ∈ dom)")
@@ -117,8 +128,12 @@ end
 
 # Things generic to all categories of Implication Frames
 ########################################################
+
+""" Type of categories of ImpFrames and simple maps """
 abstract type IFrameCat <: Model{Tuple{ImpFrame, FMap}} end
+
 abstract type HomAlgorithm end 
+
 struct BruteForce <: HomAlgorithm end
 
 """ Special naturality_failures method for each category """

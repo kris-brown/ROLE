@@ -2,3 +2,7 @@
 test/Manifest.toml
 
 Manifest.toml
+
+profile.pb.gz
+
+profile.jl
