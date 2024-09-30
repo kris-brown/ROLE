@@ -28,4 +28,4 @@ julia --project test/runtests.jl
 
 ## NOTE
 
-This library is currently under active development, and so is not yet at a point where a constant API/behavior can be assumed. That being said, if this project looks interesting/relevant please contact me!
+This library is currently under active development, and so is not yet at a point where a constant API/behavior can be assumed. That being said, if this project looks interesting/relevant please contact me at kris@topos.institute!
