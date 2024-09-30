@@ -108,16 +108,15 @@ z = 'There has been a net change in state'
 S = ImpFrame([[:x]=>[:y], [:x]=>[:y,:z], [:x,:y,:z]=>[]], [:x,:y,:z]; 
               containment=true)
 𝐱, 𝐲, 𝐳 = contents(S)
-f_and = Interp([𝐱 ∧ 𝐲, 𝐱 ∧ 𝐳])
-sound_dom(f_and) # this doesn't resemble C much at all
-f_imp = Interp([𝐱 → 𝐲, 𝐱 → 𝐳])
-sound_dom(f_imp) # this is close to C except for q,r ⊬ 
 
-# Empty role
+# When we interpret claimables as the empty role, we get 𝕀 = 𝒫(ℒ+ℒ)
 rₑ = Role{hash(S)}(BitSet(1))
 empt = Interp(fill(Content(rₑ, rₑ), 2))
-@test length(getvalue(sound_dom(empt))) == 16 # 𝕀 = 𝒫(ℒ+ℒ)
+@test length(getvalue(sound_dom(empt))) == 16 
 
+# We can recover C as interpreting its bearers in S
+x⁺ = Content(prem(𝐱), prem(𝐱))
+@test sound_dom(Interp([x⁺ ⊔ 𝐲, x⁺ ⊔ 𝐳])) == C
 
 # Sending q ↦ 𝐱 ∧ 𝐲 and r ↦ 𝐱 ∧ 𝐳
 #--------------------------------
@@ -169,7 +168,6 @@ D = ImpFrame([[]=>[1], [1]=>[2], [1]=>[2,3], [2]=>[1],
 @test ∅ ⊩ [𝐱 → 𝐲]
 @test !(∅ ⊩ [𝐱 → 𝐳])
 
-@test sound_dom(Interp([𝐱 → 𝐲, 𝐱 → 𝐳])) == C
-
+@test sound_dom(Interp([𝐱 → 𝐲, 𝐱 → 𝐳])) == C 
 
 end # module

@@ -142,8 +142,10 @@ end
 
 ImplSet(v::AbstractVector{Int}, N::Int) = ImplSet{N}(BitSet(v))
 
-ImplSet(v::AbstractVector{Impl{N}}) where N = 
+function ImplSet(v::AbstractVector{Impl{N}}) where N
+  haskey(ImpDict, N) || compute_impldict!(N) # compute this and cache
   ImplSet{N}(BitSet(getindex.(Ref(impl_dict(N)), v)))
+end
 
 ImplSet(i::Impl{N}) where N = ImplSet([i])
 
@@ -217,7 +219,6 @@ We assume the empty sequent is in this set.
 Optionally specify the size of L
 """
 function ImpFrame(xs::AbstractVector{<:Pair}, N::Int; names=nothing, containment=false)
-  N = isnothing(N) ? max(collect(iflatten(iflatten(xs)))...) : N # default to max
   haskey(ImpDict, N) || compute_impldict!(N) # compute this and cache
   id = impl_dict(N)
   I = BitSet([id[Impl(x...,N)] for x in xs])
@@ -314,13 +315,13 @@ rsr(r::Role{F}) where F = rsr(get_frame(F), ImplSet(r))
 ###############
 
 """
-An lattice of roles associated with some implication frame (ℒ,𝕀). There is a 
+A lattice of roles associated with some implication frame (ℒ,𝕀). There is a 
 special set of roles which forms a basis for the lattice (any element is an
 intersection of some subset of this basis.) This basis is not a set of atoms,
 however (the way a power set lattice has a basis of atomic elements), some of 
 the atoms are subsets of each other. If B₁ ⊆ B₂, then it doesn't make sense to 
 express some element as the intersection ∩{B₁,B₂,...} (putting B₂ in there in 
-the first place is completely redundnant). Thus, we store the inclusion poset
+the first place is completely redundant). Thus, we store the inclusion poset
 among the basis elements in order to make it easy to filter out redundant info
 and have a more normal form for expressing elements of the lattice as joins of
 basis elements.
@@ -369,16 +370,8 @@ get_frame(u::UInt64) = RoleDict[u][1]
 
 get_lattice(u::UInt64) = RoleDict[u][2]
 
-function get_lattice(i::ImpFrame) 
-  h = hash(i)
-  if haskey(RoleDict, h) 
-    get_lattice(h)
-  else 
-    RoleLattice(i)
-  end
-end
+get_lattice(i::ImpFrame) = get_lattice(hash(i))
 
-""" Compute the role lattice """
 Base.length(rl::RoleLattice{T}) where T = length(rl.atoms)
 
 """Is an implication contained in the role"""
@@ -499,6 +492,11 @@ function ∨(a::Content{F}, b::Content{F}) where F
   ((a⁺, a⁻), (b⁺, b⁻)) = (a, b)
   Content{F}(a⁺ ⊓ b⁺ ⊓ (a⁺ ⊔ b⁺), a⁻ ⊔ b⁻) 
 end
+
+# "Adjunction" of contents (pointwise)
+⊔(r1::Content{F}, r2::Content{F}) where F = 
+  Content{F}(prem(r1) ⊔ prem(r2), conc(r1) ⊔ conc(r2))
+
 
 """
 Content entailment for lists of conceptual contents Γ and Δ
