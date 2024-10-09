@@ -6,3 +6,8 @@ Manifest.toml
 profile.pb.gz
 
 profile.jl
+
+**/.DS_Store
+docs/src/generated/
+
+docs/build/
