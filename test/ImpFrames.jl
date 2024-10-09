@@ -88,6 +88,10 @@ r = 'Zazzles the cat lost a leg'
 | q,r | ✓ | ✓ | ✓ |   ✓ |
 """
 C = ImpFrame([[]=>[:q], []=>[:q,:r], [:q,:r]=>[]], [:q,:r]; containment=true)
+𝐪, 𝐫 = contents(C)
+∅ = typeof(𝐪)[]               # empty list of contents
+@test ∅ ⊩ (((𝐪 → 𝐫) → 𝐪) → 𝐪) # pierce's law
+@test ∅ ⊮ ((𝐪 → 𝐫) → 𝐪)       # not pierce's law
 
 """
 x = 'It started in state 𝓈', 

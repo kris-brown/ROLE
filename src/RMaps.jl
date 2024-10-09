@@ -1,18 +1,15 @@
 module RMaps 
 
 export FMap, Cont, ContC, Open, OpenC, is_natural, naturality_failures, 
-       homomorphisms, preimage, terminal, initial, coproduct, product, 
+       homomorphisms, preimage, 
        Interp, sound, soundness_failures, interps, sound_dom
 
-using ..ImpFrames
-using ..ImpFrames: impl_vec, get_frame, ImpDict, compute_impldict!
-import ..ImpFrames: getvalue, prem, conc
-
+using ..Impls, ..ImplSets, ..ImpFrames, ..Roles, ..Contents
+import ..Impls: prem, conc, getvalue, ImpDict, compute_impldict!
 
 using GATlab
-using StructEquality
-using Combinatorics
-using StaticArrays
+
+using StructEquality, Combinatorics, StaticArrays
 
 
 """
@@ -139,7 +136,7 @@ struct BruteForce <: HomAlgorithm end
 """ Special naturality_failures method for each category """
 is_natural(m, f, d, c) = isempty(naturality_failures(m, f, d, c))
 
-initial(::IFrameCat) = ImpFrame(0)
+# initial(::IFrameCat) = ImpFrame(0)
 
 homomorphisms(X::IFrameCat, d::ImpFrame{N}, c::ImpFrame{M}, 
               alg=BruteForce()) where {N,M} = homomorphisms(X, alg, d, c)
@@ -175,10 +172,10 @@ function empty_coproduct(Xs::ImpFrame...)
 end
 
 """Map into terminal object"""
-delete(c::IFrameCat, ::ImpFrame{N}) where N = (terminal(c), FMap(ones(Int, N)))
+# delete(c::IFrameCat, ::ImpFrame{N}) where N = (terminal(c), FMap(ones(Int, N)))
 
 """Map from initial object"""
-create(c::IFrameCat, ::ImpFrame) = (initial(c), Fmap(Int[]))
+# create(c::IFrameCat, ::ImpFrame) = (initial(c), Fmap(Int[]))
 
 # universal(i::IFrameCat, c::Coproduct, csp::Cospan)::FMap = error("undefined")
 

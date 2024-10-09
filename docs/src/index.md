@@ -1,4 +1,9 @@
-# ROLE
+# ROLE.jl
+
+```@meta
+CurrentModule = ROLE
+```
+
 Code related to Research on Logical Expressivism, as described in [Reasons for Logic, Logic for Reasons](https://www.amazon.com/Reasons-Logic-Pragmatics-Semantics-Conceptual/dp/1032360763) and Brandom's [seminar on logic](https://sites.pitt.edu/~rbrandom/Courses/2024%20Philosophy%20of%20Language/Language%20and%20Reasons%202024%20Main.html).
 
 ## Features
@@ -23,19 +28,6 @@ The next things I want to implement:
   - Nonmonotonicity of incoherence, cautious monotonicity / cumulative transitivity failures
   - See Shopper's Guide
 
-## Documentation and Tests
+# Authors
 
-One runs the test suite with the following command:
-
-```
-julia --project test/runtests.jl
-```
-
-To locally build the documentation and the literate code examples, run the following in the command line:
-```
-julia --project=docs -e "using ROLE, LiveServer; servedocs(literate_dir=\"docs/literate\",skip_dir=\"docs/src/generated\")"
-```
-
-## NOTE
-
-This library is currently under active development, and so is not yet at a point where a constant API/behavior can be assumed. That being said, if this project looks interesting/relevant please contact me at kris@topos.institute!
+This project is maintained by [Kristopher Brown](https://www.krisb.org/docs/research).
