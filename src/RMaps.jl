@@ -7,8 +7,6 @@ export FMap, Cont, ContC, Open, OpenC, is_natural, naturality_failures,
 using ..Impls, ..ImplSets, ..ImpFrames, ..Roles, ..Contents
 import ..Impls: prem, conc, getvalue, ImpDict, compute_impldict!
 
-using GATlab
-
 using StructEquality, Combinatorics, StaticArrays
 
 
@@ -127,7 +125,7 @@ end
 ########################################################
 
 """ Type of categories of ImpFrames and simple maps """
-abstract type IFrameCat <: Model{Tuple{ImpFrame, FMap}} end
+abstract type IFrameCat end
 
 abstract type HomAlgorithm end 
 
@@ -189,17 +187,17 @@ f: ℒₘ → ℒₙ between bearer sets which are required to satisfy the follo
 equation, for all good implications in 𝕀ₙ: f⁻¹(i) ∈ 𝕀ₘ
 """
 struct Cont <: IFrameCat end
-const ContC = Cont()
+# const ContC = Cont()
 
-@instance ThCategory{ImpFrame, FMap} [model::Cont] begin
-  Hom(f::FMap, d::ImpFrame, c::ImpFrame; model) =
-    is_natural(model, f, d, c) ? f : @fail join(
-      naturality_failures(model, f, d, c), "\n")
+# @instance ThCategory{ImpFrame, FMap} [model::Cont] begin
+#   Hom(f::FMap, d::ImpFrame, c::ImpFrame; model) =
+#     is_natural(model, f, d, c) ? f : @fail join(
+#       naturality_failures(model, f, d, c), "\n")
 
-  id(rr::ImpFrame) = FMap(collect(1:bearers(rr)))
-  compose(f::FMap, g::FMap) = 
-    FMap(ThCategory.compose[FinSetC()](getvalue(f), getvalue(g)))
-end
+#   id(rr::ImpFrame) = FMap(collect(1:bearers(rr)))
+#   compose(f::FMap, g::FMap) = 
+#     FMap(ThCategory.compose[FinSetC()](getvalue(f), getvalue(g)))
+# end
 
 """
 Check if a purported map satisfies the continuity constraint
@@ -231,15 +229,15 @@ equation, for all good implications in 𝕀ₘ: f(i) ∈ 𝕀ₙ
 struct Open <: IFrameCat end
 const OpenC = Open()
 
-@instance ThCategory{ImpFrame, FMap} [model::Open] begin
-  Hom(f::FMap, d::ImpFrame, c::ImpFrame; model) =
-    is_natural(model, f, d, c) ? f : @fail join(
-      naturality_failures(model, f, d, c), "\n")
+# @instance ThCategory{ImpFrame, FMap} [model::Open] begin
+#   Hom(f::FMap, d::ImpFrame, c::ImpFrame; model) =
+#     is_natural(model, f, d, c) ? f : @fail join(
+#       naturality_failures(model, f, d, c), "\n")
 
-  id(rr::ImpFrame) = FMap(collect(1:bearers(rr)))
-  compose(f::FMap, g::FMap) = 
-    FMap(ThCategory.compose[FinSetC()](getvalue(f), getvalue(g)))
-end
+#   id(rr::ImpFrame) = FMap(collect(1:bearers(rr)))
+#   compose(f::FMap, g::FMap) = 
+#     FMap(ThCategory.compose[FinSetC()](getvalue(f), getvalue(g)))
+# end
 
 """
 Check if a purported map satisfies the continuity constraint

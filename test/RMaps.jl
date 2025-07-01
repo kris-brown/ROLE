@@ -1,6 +1,5 @@
 module TestRMaps
 using ROLE, Test
-using GATlab
 
 using .ThCategory
 

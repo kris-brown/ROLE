@@ -1,7 +1,6 @@
 [deps]
 Combinatorics = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
-GATlab = "f0ffcf3b-d13a-433e-917c-cc44ccf5ead2"
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 LiveServer = "16fef848-5104-11e9-1b77-fb7a48bbb589"
 MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"

@@ -3,23 +3,21 @@ module ROLE
 using Reexport
 
 include("Impls.jl")
-include("ImplSets.jl")
-include("ImpFrames.jl")
-include("Roles.jl")
-include("Contents.jl")
-
-include("categorical_algebra/module.jl")
-
-include("RMaps.jl")
-
 @reexport using .Impls
+
+include("ImplSets.jl")
 @reexport using .ImplSets
+
+include("ImpFrames.jl")
 @reexport using .ImpFrames
+
+include("Roles.jl")
 @reexport using .Roles
+
+include("Contents.jl")
 @reexport using .Contents
 
-@reexport using .CategoricalAlgebra
-
+include("RMaps.jl")
 @reexport using .RMaps
 
 end # module

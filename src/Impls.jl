@@ -3,7 +3,6 @@ export Impl, bearers, prem, conc, has_prem, has_conc, impl_dict, impl_vec, ⊂,
        getvalue
 
 using StructEquality, Combinatorics
-import GATlab: getvalue 
 
 
 const Maybe{T} = Union{Nothing, T}
