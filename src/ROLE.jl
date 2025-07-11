@@ -20,4 +20,7 @@ include("Contents.jl")
 include("RMaps.jl")
 @reexport using .RMaps
 
+include("NCImpls.jl")
+@reexport using .NCImpls
+
 end # module
