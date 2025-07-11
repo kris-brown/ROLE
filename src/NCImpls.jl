@@ -4,9 +4,6 @@ export NCImpl,BearerMultiset, bearers, isempty, testy, subpart
 using StaticArrays
 using StructEquality, Combinatorics
 
-abstract type PairWrapper{N,T} end
-getvalue(i::PairWrapper{N,T}) where {N,T} = (i.prem, i.conc)
-
 ⊂(x,y) = x != y && x ⊆ y
 
 """
@@ -38,6 +35,9 @@ end
 
 Base.isempty(i::BearerMultiset{N}) where N = all(i[k] == 0 for k in 1:N)
 
+Base.sum(a::BearerMultiset{N}, b::BearerMultiset{N}) = a.value + b.value
+
+
 function Base.show(io::IO, ::MIME"text/plain", i::BearerMultiset{N}) where N
     if isempty(i)
         print(io, "∅")
@@ -58,7 +58,7 @@ an implication i is n. The first vector, i.prem, consists of the positive
 (conclusory) claimables. E.g. if L = [a,b], then a,b,b ⊢ a,a is the pair 
 ([1,2],[2,0]).
 """
-@struct_hash_equal struct NCImpl{N} # <: PairWrapper{N, Int}
+@struct_hash_equal struct NCImpl{N}
     prem::BearerMultiset{N}
     conc::BearerMultiset{N}
     NCImpl{N}(p::BearerMultiset{N}=BearerMultiset{N}(), q::BearerMultiset{N}=BearerMultiset{N}()) where {N} = new{N}(p,q)
@@ -87,6 +87,9 @@ Base.isempty(i::NCImpl{N}) where N = all(i[k] == 0 for k in 1:N)
 """Gives the number of bearers"""
 bearers(::NCImpl{N}) where N = N
 
+prem(i::NCImpl{N}) = i.prem
+conc(i::NCImpl{N}) = i.conc
+
 function Base.show(io::IO, ::MIME"text/plain", i::NCImpl{N}) where N
     letters = [Char('a' + k - 1) for k in 1:N]
     if isempty(i.prem)
@@ -109,11 +112,7 @@ subpart(i1::NCImpl, i2::NCImpl) = i1.prem ≤ i2.prem && i1.conc ≤ i2.conc
 
 function Base.union(impls::Vector{NCImpl{N}}) where N
     isempty(impls) && return NCImpl{N}()
-    prems = map(impl -> impl.prem.value, impls)
-    concs = map(impl -> impl.conc.value, impls)
-    sum_prem = reduce(+, prems)
-    sum_conc = reduce(+, concs)
-    NCImpl{N}(BearerMultiset{N}(sum_prem), BearerMultiset{N}(sum_conc))
+    NCImpl{N}(BearerMultiset{N}(sum(prem.(impl))), BearerMultiset{N}(sum(conc.(impl))))
 end
 
 Base.union(i::NCImpl{N}...) where N = union(collect(i))

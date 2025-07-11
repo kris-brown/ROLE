@@ -1,5 +1,5 @@
 test/Manifest.toml
-
+.vscode
 Manifest.toml
 
 profile.pb.gz
@@ -10,5 +10,3 @@ profile.jl
 docs/src/generated/
 
 docs/build/
-
-.vscode
