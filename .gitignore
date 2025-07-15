@@ -1,6 +1,5 @@
-
 test/Manifest.toml
-
+.vscode
 Manifest.toml
 
 profile.pb.gz
