@@ -35,7 +35,7 @@ end
 
 Base.isempty(i::BearerMultiset{N}) where N = all(i[k] == 0 for k in 1:N)
 
-Base.sum(a::BearerMultiset{N}, b::BearerMultiset{N}) = a.value + b.value
+Base.sum(a::BearerMultiset{N}, b::BearerMultiset{N}) where N = a.value + b.value
 
 
 function Base.show(io::IO, ::MIME"text/plain", i::BearerMultiset{N}) where N
@@ -87,8 +87,8 @@ Base.isempty(i::NCImpl{N}) where N = all(i[k] == 0 for k in 1:N)
 """Gives the number of bearers"""
 bearers(::NCImpl{N}) where N = N
 
-prem(i::NCImpl{N}) = i.prem
-conc(i::NCImpl{N}) = i.conc
+prem(i::NCImpl{N}) where N = i.prem
+conc(i::NCImpl{N}) where N = i.conc
 
 function Base.show(io::IO, ::MIME"text/plain", i::NCImpl{N}) where N
     letters = [Char('a' + k - 1) for k in 1:N]

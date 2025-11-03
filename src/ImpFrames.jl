@@ -15,7 +15,7 @@ const iflatten = Iterators.flatten
 
 using ..Impls, ..ImplSets
 using ..Impls: BitSetWrapper, Maybe, ImpDict, compute_impldict!, CONTAINMENT
-import ..Impls: prem, conc, bearers
+import ..Impls: prem, conc, bearers, Impl
 
 
 # Implication frames
@@ -76,7 +76,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::ImpFrame{N}) where N
     map(powerset(1:N)) do Γ
       Impl(Γ, Δ, N) ∈ r ? "✓" : "×"
     end
-  end); header=names, row_labels=names, tf=tf_markdown))
+  end); column_labels=names, row_labels=names, backend=:text))
 end
 
 Base.string(i::ImpFrame) = sprint(show, "text/plain", i)
