@@ -8,6 +8,8 @@ Code related to Research on Logical Expressivism, as described in [Reasons for L
 - Compute logical operations on conceptual contents
 - Compute content entailment among conceptual contents
   - Use this to determine $\mathbb{I}_X$ given a lexicon $\mathcal{L}_X$, an implication frame $Y$, and an interpretation function $\mathcal{L}_X \rightarrow \mathbb{C}_Y$.
+ 
+For a sense of how things work with some examples, check out the [test file](test/ImpFrames.jl).
 
 ## Roadmap
 
